@@ -36,6 +36,12 @@ Schedule Format (stored as JSON in AGENT_SCHEDULES variable):
             "prompt": "Validate robot models in Isaac Sim",
             "workflow": "isaac-sim.yml"
         },
+        "cross_repo_deploy": {
+            "cron": "0 3 * * 5",
+            "enabled": true,
+            "prompt": "Deploy latest to staging",
+            "workflow": "myorg/infra-ops/deploy.yml"
+        },
         "deploy_friday": {
             "run_at": "2024-01-19T15:00:00Z",
             "enabled": true,
@@ -279,6 +285,35 @@ def _run_at_matches(run_at: str, now: datetime) -> bool:
         return False
 
 
+def _parse_workflow_target(workflow: str, default_repo: str) -> tuple[str, str]:
+    """Parse a workflow target into (repository, workflow_file).
+
+    Supports two formats:
+    - "agent.yml" → (default_repo, "agent.yml") — same repo
+    - "owner/repo/workflow.yml" → ("owner/repo", "workflow.yml") — cross-repo
+
+    Args:
+        workflow: Workflow target string
+        default_repo: Default repository (GITHUB_REPOSITORY)
+
+    Returns:
+        Tuple of (repository, workflow_filename)
+    """
+    if "/" in workflow:
+        # Check if it looks like owner/repo/file.yml (at least 2 slashes for cross-repo)
+        parts = workflow.split("/")
+        if len(parts) >= 3:
+            # owner/repo/workflow.yml
+            repo = f"{parts[0]}/{parts[1]}"
+            wf_file = "/".join(parts[2:])
+            return (repo, wf_file)
+        elif len(parts) == 2 and parts[1].endswith(".yml"):
+            # Could be "owner/agent.yml" — ambiguous, treat as same-repo path
+            return (default_repo, workflow)
+    # Simple filename like "agent.yml"
+    return (default_repo, workflow)
+
+
 def _get_schedules(repository: str, token: str) -> dict[str, Any]:
     """Get current schedules from GitHub variable."""
     result = _get_github_variable(repository, SCHEDULES_VARIABLE, token)
@@ -341,10 +376,12 @@ def scheduler(
         max_tokens: Max tokens for model response
         context: Additional context to include in the prompt
         repository: GitHub repository (defaults to GITHUB_REPOSITORY env var)
-        workflow: Target workflow file to dispatch to (default: "agent.yml").
-            Use "thor.yml" for Thor GPU/hardware tasks, "isaac-sim.yml" for
-            Isaac Sim simulation tasks, or any other workflow filename that
-            supports workflow_dispatch with prompt/model/tools inputs.
+        workflow: Target workflow to dispatch to. Supports two formats:
+            - Filename only: "agent.yml" (dispatches within same repo)
+            - Cross-repo: "owner/repo/workflow.yml" (dispatches to another repo)
+            Default: "agent.yml" (same repo, ubuntu-latest runner).
+            The control loop parses this to determine the target repository
+            and workflow file for the GitHub Actions dispatch API.
 
     Returns:
         Dict with status and operation results
@@ -381,6 +418,15 @@ def scheduler(
             cron="0 6 * * 1",
             prompt="Validate all robot models in Isaac Sim",
             workflow="isaac-sim.yml"
+        )
+
+        # Cross-repo dispatch: trigger a workflow in another repository
+        scheduler(
+            action="add",
+            job_id="infra_deploy",
+            cron="0 3 * * 5",
+            prompt="Deploy latest release to staging",
+            workflow="myorg/infra-ops/deploy.yml"
         )
 
         # Schedule a one-time deployment for a specific time
@@ -426,10 +472,15 @@ def scheduler(
         - "2024-01-20T09:30:00" = January 20, 2024 at 9:30 AM (assumes UTC)
 
     Workflow Targets:
-        - "agent.yml" (default) - Runs on ubuntu-latest (cloud agent)
-        - "thor.yml" - Runs on self-hosted Thor (NVIDIA Jetson AGX Thor, GPU, CUDA)
-        - "isaac-sim.yml" - Runs on self-hosted Isaac Sim EC2 (L40S GPU, Isaac Sim 5.1)
-        - Any other workflow file that accepts workflow_dispatch with prompt input
+        Same-repo (filename only):
+        - "agent.yml" (default) - ubuntu-latest cloud agent
+        - "thor.yml" - self-hosted Thor (NVIDIA Jetson AGX Thor, GPU)
+        - "isaac-sim.yml" - self-hosted Isaac Sim EC2 (L40S GPU)
+
+        Cross-repo (owner/repo/file.yml):
+        - "myorg/other-repo/agent.yml" - dispatch to another repo's workflow
+        - "myorg/infra-ops/deploy.yml" - trigger deploy in infra repo
+        Requires PAT_TOKEN with workflow dispatch permissions on target repo.
     """
     try:
         repo = repository or _get_repository()
@@ -470,8 +521,12 @@ def scheduler(
                     "thor.yml": "🤖",
                     "isaac-sim.yml": "🎮",
                 }
-                runner_icon = runner_icons.get(target_wf, "⚙️")
-                lines.append(f"### {enabled} {job_type} {runner_icon} `{jid}`")
+                # For cross-repo workflows, use the filename part for icon lookup
+                _, wf_file = _parse_workflow_target(target_wf, repo)
+                runner_icon = runner_icons.get(wf_file, "⚙️")
+                is_cross_repo = "/" in target_wf and target_wf.count("/") >= 2
+                cross_tag = " 🌐" if is_cross_repo else ""
+                lines.append(f"### {enabled} {job_type} {runner_icon} `{jid}`{cross_tag}")
                 lines.append(f"- **Workflow:** `{target_wf}`")
 
                 if job.get("cron"):
