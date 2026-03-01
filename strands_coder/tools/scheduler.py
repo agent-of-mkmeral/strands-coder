@@ -24,6 +24,18 @@ Schedule Format (stored as JSON in AGENT_SCHEDULES variable):
             "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             "max_tokens": 10000
         },
+        "g1_training": {
+            "cron": "0 2 * * *",
+            "enabled": true,
+            "prompt": "Run G1 humanoid RL training",
+            "workflow": "thor.yml"
+        },
+        "sim_validation": {
+            "cron": "0 6 * * 1",
+            "enabled": true,
+            "prompt": "Validate robot models in Isaac Sim",
+            "workflow": "isaac-sim.yml"
+        },
         "deploy_friday": {
             "run_at": "2024-01-19T15:00:00Z",
             "enabled": true,
@@ -126,9 +138,7 @@ def _get_github_variable(repository: str, name: str, token: str) -> dict[str, An
         return {"success": False, "message": str(e)}
 
 
-def _set_github_variable(
-    repository: str, name: str, value: str, token: str
-) -> dict[str, Any]:
+def _set_github_variable(repository: str, name: str, value: str, token: str) -> dict[str, Any]:
     """Create or update a GitHub repository variable."""
     headers = {
         "Accept": "application/vnd.github+json",
@@ -138,9 +148,7 @@ def _set_github_variable(
 
     # Try to update first
     url = f"{GITHUB_API_URL}/repos/{repository}/actions/variables/{name}"
-    response = requests.patch(
-        url, headers=headers, json={"name": name, "value": value}, timeout=30
-    )
+    response = requests.patch(url, headers=headers, json={"name": name, "value": value}, timeout=30)
 
     if response.status_code == 204:
         return {"success": True, "message": f"Variable {name} updated"}
@@ -148,9 +156,7 @@ def _set_github_variable(
     # If not found, create it
     if response.status_code == 404:
         url = f"{GITHUB_API_URL}/repos/{repository}/actions/variables"
-        response = requests.post(
-            url, headers=headers, json={"name": name, "value": value}, timeout=30
-        )
+        response = requests.post(url, headers=headers, json={"name": name, "value": value}, timeout=30)
         if response.status_code == 201:
             return {"success": True, "message": f"Variable {name} created"}
 
@@ -280,22 +286,14 @@ def _get_schedules(repository: str, token: str) -> dict[str, Any]:
         return {"jobs": {}, "timezone": "UTC"}
 
     try:
-        return (
-            json.loads(result["value"])
-            if result["value"]
-            else {"jobs": {}, "timezone": "UTC"}
-        )
+        return json.loads(result["value"]) if result["value"] else {"jobs": {}, "timezone": "UTC"}
     except json.JSONDecodeError:
         return {"jobs": {}, "timezone": "UTC"}
 
 
-def _save_schedules(
-    repository: str, schedules: dict[str, Any], token: str
-) -> dict[str, Any]:
+def _save_schedules(repository: str, schedules: dict[str, Any], token: str) -> dict[str, Any]:
     """Save schedules to GitHub variable."""
-    return _set_github_variable(
-        repository, SCHEDULES_VARIABLE, json.dumps(schedules, indent=2), token
-    )
+    return _set_github_variable(repository, SCHEDULES_VARIABLE, json.dumps(schedules, indent=2), token)
 
 
 @tool
@@ -312,12 +310,14 @@ def scheduler(
     max_tokens: int | None = None,
     context: str | None = None,
     repository: str | None = None,
+    workflow: str | None = None,
 ) -> dict[str, Any]:
     """Manage scheduled jobs for the autonomous agent.
 
     This tool manages a schedule of jobs stored in GitHub Action variables.
     Jobs can be recurring (cron) or one-time (run_at).
-    The control loop workflow checks this schedule hourly and dispatches jobs.
+    The control loop workflow checks this schedule hourly and dispatches jobs
+    to the appropriate workflow file based on the "workflow" field.
 
     Actions:
         - "list": List all scheduled jobs
@@ -341,6 +341,10 @@ def scheduler(
         max_tokens: Max tokens for model response
         context: Additional context to include in the prompt
         repository: GitHub repository (defaults to GITHUB_REPOSITORY env var)
+        workflow: Target workflow file to dispatch to (default: "agent.yml").
+            Use "thor.yml" for Thor GPU/hardware tasks, "isaac-sim.yml" for
+            Isaac Sim simulation tasks, or any other workflow filename that
+            supports workflow_dispatch with prompt/model/tools inputs.
 
     Returns:
         Dict with status and operation results
@@ -350,7 +354,7 @@ def scheduler(
         # List all jobs
         scheduler(action="list")
 
-        # Add a recurring daily code review job at 9 AM UTC
+        # Add a recurring daily code review job at 9 AM UTC (runs on agent.yml / ubuntu)
         scheduler(
             action="add",
             job_id="daily_review",
@@ -360,6 +364,25 @@ def scheduler(
             tools="strands_tools:shell;strands_coder:use_github"
         )
 
+        # Schedule a GPU task on Thor (self-hosted runner)
+        scheduler(
+            action="add",
+            job_id="g1_training",
+            cron="0 2 * * *",
+            prompt="Run G1 humanoid RL training with Newton backend",
+            workflow="thor.yml",
+            tools="strands_tools:shell,file_read,file_write"
+        )
+
+        # Schedule an Isaac Sim task on EC2 (self-hosted runner)
+        scheduler(
+            action="add",
+            job_id="sim_validation",
+            cron="0 6 * * 1",
+            prompt="Validate all robot models in Isaac Sim",
+            workflow="isaac-sim.yml"
+        )
+
         # Schedule a one-time deployment for a specific time
         scheduler(
             action="add",
@@ -367,14 +390,6 @@ def scheduler(
             run_at="2024-01-20T14:00:00Z",
             prompt="Deploy version 2.0 to production and verify health checks",
             once=True  # Auto-remove after execution
-        )
-
-        # Schedule a reminder (one-time, keeps in history)
-        scheduler(
-            action="add",
-            job_id="team_meeting_reminder",
-            run_at="2024-01-19T09:00:00Z",
-            prompt="Remind the team about the standup meeting"
         )
 
         # Check which jobs should run now (used by control loop)
@@ -409,28 +424,26 @@ def scheduler(
         Examples:
         - "2024-01-20T14:00:00Z" = January 20, 2024 at 2:00 PM UTC
         - "2024-01-20T09:30:00" = January 20, 2024 at 9:30 AM (assumes UTC)
+
+    Workflow Targets:
+        - "agent.yml" (default) - Runs on ubuntu-latest (cloud agent)
+        - "thor.yml" - Runs on self-hosted Thor (NVIDIA Jetson AGX Thor, GPU, CUDA)
+        - "isaac-sim.yml" - Runs on self-hosted Isaac Sim EC2 (L40S GPU, Isaac Sim 5.1)
+        - Any other workflow file that accepts workflow_dispatch with prompt input
     """
     try:
         repo = repository or _get_repository()
         if not repo:
             return {
                 "status": "error",
-                "content": [
-                    {
-                        "text": "Error: Repository not specified and GITHUB_REPOSITORY not set"
-                    }
-                ],
+                "content": [{"text": "Error: Repository not specified and GITHUB_REPOSITORY not set"}],
             }
 
         token = _get_github_token()
         if not token:
             return {
                 "status": "error",
-                "content": [
-                    {
-                        "text": "Error: GitHub token not available (PAT_TOKEN or GITHUB_TOKEN)"
-                    }
-                ],
+                "content": [{"text": "Error: GitHub token not available (PAT_TOKEN or GITHUB_TOKEN)"}],
             }
 
         # LIST - Show all jobs
@@ -451,7 +464,15 @@ def scheduler(
             for jid, job in jobs.items():
                 enabled = "✅" if job.get("enabled", True) else "❌"
                 job_type = "🔄" if job.get("cron") else "📅"
-                lines.append(f"### {enabled} {job_type} `{jid}`")
+                target_wf = job.get("workflow", "agent.yml")
+                runner_icons = {
+                    "agent.yml": "🖥️",
+                    "thor.yml": "🤖",
+                    "isaac-sim.yml": "🎮",
+                }
+                runner_icon = runner_icons.get(target_wf, "⚙️")
+                lines.append(f"### {enabled} {job_type} {runner_icon} `{jid}`")
+                lines.append(f"- **Workflow:** `{target_wf}`")
 
                 if job.get("cron"):
                     lines.append(f"- **Cron:** `{job['cron']}` (recurring)")
@@ -509,6 +530,7 @@ def scheduler(
                             "max_tokens": job.get("max_tokens"),
                             "context": job.get("context"),
                             "once": job.get("once", False),
+                            "workflow": job.get("workflow", "agent.yml"),
                         }
                     )
 
@@ -521,11 +543,7 @@ def scheduler(
             if not jobs_to_run:
                 return {
                     "status": "success",
-                    "content": [
-                        {
-                            "text": f"No jobs scheduled to run at {now.strftime('%Y-%m-%d %H:%M')} UTC"
-                        }
-                    ],
+                    "content": [{"text": f"No jobs scheduled to run at {now.strftime('%Y-%m-%d %H:%M')} UTC"}],
                     "jobs_to_run": [],
                 }
 
@@ -541,9 +559,7 @@ def scheduler(
                 lines.append("")
 
             if jobs_to_remove:
-                lines.append(
-                    f"\n*Removed {len(jobs_to_remove)} one-time job(s): {', '.join(jobs_to_remove)}*"
-                )
+                lines.append(f"\n*Removed {len(jobs_to_remove)} one-time job(s): {', '.join(jobs_to_remove)}*")
 
             return {
                 "status": "success",
@@ -589,9 +605,7 @@ def scheduler(
                     return {
                         "status": "error",
                         "content": [
-                            {
-                                "text": f"Error: Invalid run_at format. Use ISO 8601 (e.g., 2024-01-20T14:00:00Z)"
-                            }
+                            {"text": "Error: Invalid run_at format. Use ISO 8601 (e.g., 2024-01-20T14:00:00Z)"}
                         ],
                     }
 
@@ -624,6 +638,8 @@ def scheduler(
                 schedules["jobs"][job_id]["max_tokens"] = max_tokens
             if context:
                 schedules["jobs"][job_id]["context"] = context
+            if workflow:
+                schedules["jobs"][job_id]["workflow"] = workflow
 
             result = _save_schedules(repo, schedules, token)
             if not result["success"]:
@@ -635,12 +651,18 @@ def scheduler(
             action_word = "updated" if is_update else "added"
             schedule_info = f"**Cron:** `{cron}`" if cron else f"**Run At:** `{run_at}`"
             once_info = " (once, auto-remove)" if once else ""
+            workflow_info = f"\n**Workflow:** `{workflow}`" if workflow else ""
+            prompt_preview = prompt[:100]
 
             return {
                 "status": "success",
                 "content": [
                     {
-                        "text": f"✅ Job `{job_id}` {action_word} successfully\n\n{schedule_info}{once_info}\n**Prompt:** {prompt[:100]}..."
+                        "text": (
+                            f"✅ Job `{job_id}` {action_word} successfully\n\n"
+                            f"{schedule_info}{once_info}{workflow_info}\n"
+                            f"**Prompt:** {prompt_preview}..."
+                        )
                     }
                 ],
             }
@@ -727,8 +749,10 @@ def scheduler(
 
             job = jobs[job_id]
             job_type = "🔄 Recurring" if job.get("cron") else "📅 One-time"
+            target_wf = job.get("workflow", "agent.yml")
             lines = [f"## Job: `{job_id}` ({job_type})\n"]
             lines.append(f"**Enabled:** {'✅' if job.get('enabled', True) else '❌'}")
+            lines.append(f"**Workflow:** `{target_wf}`")
 
             if job.get("cron"):
                 lines.append(f"**Cron:** `{job['cron']}`")
@@ -758,9 +782,7 @@ def scheduler(
             return {
                 "status": "error",
                 "content": [
-                    {
-                        "text": f"Unknown action: {action}. Valid: list, check, add, remove, enable, disable, get"
-                    }
+                    {"text": f"Unknown action: {action}. Valid: list, check, add, remove, enable, disable, get"}
                 ],
             }
 
