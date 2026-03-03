@@ -92,14 +92,14 @@ jobs:
         if: steps.check-auth.outputs.authorized == 'true'
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Run Strands Agent
         if: steps.check-auth.outputs.authorized == 'true'
         uses: ./
         env:
           # GitHub tokens
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           
           # Model provider API keys (set the one you need based on STRANDS_PROVIDER)
