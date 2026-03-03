@@ -34,10 +34,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cagataycali/strands-coder"
-"Bug Tracker" = "https://github.com/cagataycali/strands-coder/issues"
+Homepage = "https://github.com/agent-of-mkmeral/strands-coder"
+"Bug Tracker" = "https://github.com/agent-of-mkmeral/strands-coder/issues"
 Documentation = "https://strandsagents.com/"
-Repository = "https://github.com/cagataycali/strands-coder"
+Repository = "https://github.com/agent-of-mkmeral/strands-coder"
 
 [project.scripts]
 strands-coder = "strands_coder.agent_runner:main"

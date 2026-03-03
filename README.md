@@ -16,8 +16,8 @@
   <div align="center">
     <a href="https://github.com/marketplace/actions/strands-coder"><img alt="GitHub Marketplace" src="https://img.shields.io/badge/Marketplace-Strands%20Coder-blue?logo=github"/></a>
     <a href="https://pypi.org/project/strands-coder/"><img alt="PyPI Version" src="https://img.shields.io/pypi/v/strands-coder"/></a>
-    <a href="https://github.com/cagataycali/strands-coder"><img alt="GitHub stars" src="https://img.shields.io/github/stars/cagataycali/strands-coder"/></a>
-    <a href="https://github.com/cagataycali/strands-coder/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/cagataycali/strands-coder"/></a>
+    <a href="https://github.com/agent-of-mkmeral/strands-coder"><img alt="GitHub stars" src="https://img.shields.io/github/stars/agent-of-mkmeral/strands-coder"/></a>
+    <a href="https://github.com/agent-of-mkmeral/strands-coder/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/agent-of-mkmeral/strands-coder"/></a>
     <a href="https://aws.amazon.com/bedrock/"><img alt="Bedrock" src="https://img.shields.io/badge/AWS-Bedrock-FF9900?logo=amazon-aws"/></a>
     <a href="https://cloud.langfuse.com"><img alt="Langfuse" src="https://img.shields.io/badge/Langfuse-Observability-4B32C3"/></a>
   </div>
@@ -69,7 +69,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: cagataycali/strands-coder@v1
+      - uses: agent-of-mkmeral/strands-coder@v1
         with:
           prompt: ${{ github.event.inputs.prompt || 'Respond to this GitHub event' }}
           provider: bedrock
@@ -241,7 +241,7 @@ pip install strands-coder
 Or from source:
 
 ```bash
-git clone https://github.com/cagataycali/strands-coder
+git clone https://github.com/agent-of-mkmeral/strands-coder
 cd strands-coder
 pip install -e .
 ```
@@ -844,9 +844,9 @@ Apache-2.0 - see [LICENSE](LICENSE) file.
 
 <div align="center">
   <a href="https://github.com/marketplace/actions/strands-coder">Marketplace</a>
-  ◆ <a href="https://github.com/cagataycali/strands-coder">GitHub</a>
+  ◆ <a href="https://github.com/agent-of-mkmeral/strands-coder">GitHub</a>
   ◆ <a href="https://pypi.org/project/strands-coder/">PyPI</a>
-  ◆ <a href="https://dev.strands.my">Dashboard</a>
+  ◆ <a href="https://agent-of-mkmeral.github.io/strands-coder/">Dashboard</a>
   ◆ <a href="https://strandsagents.com/">Strands Docs</a>
   ◆ <a href="https://aws.amazon.com/bedrock/">AWS Bedrock</a>
   ◆ <a href="https://cloud.langfuse.com">Langfuse</a>

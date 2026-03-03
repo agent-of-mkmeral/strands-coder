@@ -1123,13 +1123,13 @@ def projects(
         # List all projects
         result = agent.tool.projects(
             action="list_projects",
-            owner="cagataycali"
+            owner="agent-of-mkmeral"
         )
 
         # Create project
         result = agent.tool.projects(
             action="create_project",
-            owner="cagataycali",
+            owner="agent-of-mkmeral",
             title="Strands-Coder Work Tracker",
             description="Autonomous agent work tracking"
         )

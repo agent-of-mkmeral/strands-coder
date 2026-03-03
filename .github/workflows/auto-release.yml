@@ -72,7 +72,7 @@ jobs:
           ### 📋 Changes
           This release includes the latest changes tagged as v${{ steps.get_version.outputs.version }}.
           
-          **Full Changelog**: https://github.com/cagataycali/strands-coder/releases
+          **Full Changelog**: https://github.com/agent-of-mkmeral/strands-coder/releases
         draft: false
         prerelease: false
 
@@ -82,4 +82,4 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "- **Version:** v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
         echo "- **PyPI:** https://pypi.org/project/strands-coder/${{ steps.get_version.outputs.version }}/" >> $GITHUB_STEP_SUMMARY
-        echo "- **GitHub Release:** https://github.com/cagataycali/strands-coder/releases/tag/v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **GitHub Release:** https://github.com/agent-of-mkmeral/strands-coder/releases/tag/v${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
