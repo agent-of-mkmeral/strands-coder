@@ -64,6 +64,8 @@ from rich.console import Console
 from rich.panel import Panel
 from strands import tool
 
+from strands_coder.tools.github_guardrails import validate_graphql_owner
+
 # Initialize colorama
 init(autoreset=True)
 
@@ -335,6 +337,14 @@ def use_github(
     # Set default for variables if None
     if variables is None:
         variables = {}
+
+    # Validate target owner is in allowed list
+    owner_error = validate_graphql_owner(variables)
+    if owner_error:
+        return {
+            "status": "error",
+            "content": [{"text": owner_error}],
+        }
 
     STRANDS_BYPASS_TOOL_CONSENT = (
         os.environ.get("BYPASS_TOOL_CONSENT", "").lower() == "true"

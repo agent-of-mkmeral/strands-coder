@@ -69,6 +69,8 @@ from rich.table import Table
 from strands import tool
 from strands_tools.utils import console_util
 
+from strands_coder.tools.github_guardrails import validate_repo_owner
+
 console = console_util.create()
 
 
@@ -121,6 +123,10 @@ def _github_request(
         repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
         return "Error: GITHUB_REPOSITORY environment variable not found"
+
+    owner_error = validate_repo_owner(repo)
+    if owner_error:
+        return owner_error
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
@@ -582,6 +588,10 @@ def get_pr_review_and_comments(
         repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
         return "Error: GITHUB_REPOSITORY environment variable not found"
+
+    owner_error = validate_repo_owner(repo)
+    if owner_error:
+        return owner_error
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
