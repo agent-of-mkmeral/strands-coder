@@ -1,0 +1,186 @@
+name: Mention Trigger
+
+on:
+  # Check for mentions every 15 minutes
+  schedule:
+    - cron: '*/15 * * * *'
+  
+  # Allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions: write-all
+
+jobs:
+  check-mentions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for new mentions
+        id: check-mentions
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBUG: ${{ github.event.inputs.debug || 'false' }}
+        run: |
+          # Use PAT_TOKEN which has access to notifications across repos
+          TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
+          
+          echo "🔍 Checking for @agent-of-mkmeral mentions..."
+          
+          # Fetch unread notifications (mentions show up as notifications)
+          NOTIFICATIONS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/notifications?all=false&participating=true&per_page=50")
+          
+          if [ "$DEBUG" = "true" ]; then
+            echo "Raw notifications response:"
+            echo "$NOTIFICATIONS" | jq '.'
+          fi
+          
+          # Filter for mention notifications
+          MENTIONS=$(echo "$NOTIFICATIONS" | jq -r '
+            [.[] | select(
+              .reason == "mention" or 
+              .reason == "team_mention" or
+              (.subject.type == "Issue" or .subject.type == "PullRequest")
+            )] | 
+            map({
+              id: .id,
+              reason: .reason,
+              repository: .repository.full_name,
+              subject_type: .subject.type,
+              subject_title: .subject.title,
+              subject_url: .subject.url,
+              updated_at: .updated_at,
+              unread: .unread
+            })
+          ')
+          
+          MENTION_COUNT=$(echo "$MENTIONS" | jq 'length')
+          echo "📬 Found $MENTION_COUNT potential mentions/notifications"
+          
+          if [ "$MENTION_COUNT" -gt 0 ]; then
+            echo "has_mentions=true" >> $GITHUB_OUTPUT
+            echo "mentions<<EOF" >> $GITHUB_OUTPUT
+            echo "$MENTIONS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo ""
+            echo "📋 Mentions found:"
+            echo "$MENTIONS" | jq -r '.[] | "  - [\(.repository)] \(.subject_type): \(.subject_title)"'
+          else
+            echo "has_mentions=false" >> $GITHUB_OUTPUT
+            echo "✅ No new mentions to process"
+          fi
+
+      - name: Process mentions
+        if: steps.check-mentions.outputs.has_mentions == 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MENTIONS: ${{ steps.check-mentions.outputs.mentions }}
+        run: |
+          TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
+          
+          echo "🚀 Processing mentions..."
+          
+          # Process each mention
+          echo "$MENTIONS" | jq -c '.[]' | while read -r mention; do
+            REPO=$(echo "$mention" | jq -r '.repository')
+            SUBJECT_TYPE=$(echo "$mention" | jq -r '.subject_type')
+            SUBJECT_URL=$(echo "$mention" | jq -r '.subject_url')
+            NOTIFICATION_ID=$(echo "$mention" | jq -r '.id')
+            TITLE=$(echo "$mention" | jq -r '.subject_title')
+            
+            echo ""
+            echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE"
+            
+            # Get the actual issue/PR content
+            CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$SUBJECT_URL")
+            
+            BODY=$(echo "$CONTENT" | jq -r '.body // ""')
+            NUMBER=$(echo "$CONTENT" | jq -r '.number')
+            
+            # Check if body contains @agent-of-mkmeral
+            if echo "$BODY" | grep -qi "@agent-of-mkmeral"; then
+              echo "  ✅ Found @agent-of-mkmeral mention in body"
+              
+              curl -s -X POST \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                -d "{
+                  \"ref\": \"main\",
+                  \"inputs\": {
+                    \"prompt\": \"I was mentioned in $REPO#$NUMBER. Please check the issue/PR and respond appropriately. URL: https://github.com/$REPO/issues/$NUMBER\"
+                  }
+                }"
+              
+              echo "  ✅ Workflow dispatched"
+            else
+              echo "  ⏭️ No direct mention found, checking comments..."
+              
+              COMMENTS_URL=$(echo "$CONTENT" | jq -r '.comments_url // ""')
+              if [ -n "$COMMENTS_URL" ] && [ "$COMMENTS_URL" != "null" ]; then
+                LATEST_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "${COMMENTS_URL}?per_page=10&sort=created&direction=desc")
+                
+                MENTION_COMMENT=$(echo "$LATEST_COMMENTS" | jq -r '
+                  [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | first // empty
+                ')
+                
+                if [ -n "$MENTION_COMMENT" ]; then
+                  COMMENT_AUTHOR=$(echo "$LATEST_COMMENTS" | jq -r '
+                    [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | first | .user.login // ""
+                  ')
+                  
+                  echo "  ✅ Found @agent-of-mkmeral mention in comment by @$COMMENT_AUTHOR"
+                  
+                  curl -s -X POST \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                    -d "{
+                      \"ref\": \"main\",
+                      \"inputs\": {
+                        \"prompt\": \"I was mentioned by @$COMMENT_AUTHOR in $REPO#$NUMBER. Please respond to this mention. URL: https://github.com/$REPO/issues/$NUMBER\"
+                      }
+                    }"
+                  
+                  echo "  ✅ Workflow dispatched"
+                else
+                  echo "  ⏭️ No @agent-of-mkmeral mention found in comments"
+                fi
+              fi
+            fi
+            
+            # Mark notification as read
+            echo "  📖 Marking notification as read..."
+            curl -s -X PATCH \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
+            
+          done
+          
+          echo ""
+          echo "✅ All mentions processed"
+
+      - name: Summary
+        run: |
+          echo "## Mention Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Has Mentions:** ${{ steps.check-mentions.outputs.has_mentions }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Polling Interval:** Every 15 minutes" >> $GITHUB_STEP_SUMMARY
