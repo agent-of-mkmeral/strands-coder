@@ -7,6 +7,7 @@ enabling intelligent repository automation through AI agents.
 __version__ = "0.1.0"
 
 from .agent_runner import run_agent
+from .activity import get_agent_activity, check_throttle, get_activity_summary
 from .tools.create_subagent import create_subagent
 from .tools.projects import projects
 from .tools.scheduler import scheduler
@@ -31,6 +32,10 @@ from .tools.use_github import use_github
 __all__ = [
     "run_agent",
     "__version__",
+    # Activity tracking
+    "get_agent_activity",
+    "check_throttle",
+    "get_activity_summary",
     # Tools
     "projects",
     "create_subagent",
