@@ -365,6 +365,7 @@
             <button class="nav-tab active" data-page="dashboard" onclick="window.showPage('dashboard')">📊 Dashboard</button>
             <button class="nav-tab" data-page="issues" onclick="window.showPage('issues')">📋 Issues</button>
             <button class="nav-tab" data-page="actions" onclick="window.showPage('actions')">⚡ Actions</button>
+            <button class="nav-tab" data-page="activity" onclick="window.showPage(\'activity\')">📊 Activity</button>
             <button class="nav-tab" data-page="traces" onclick="window.showPage('traces')">📈 Traces</button>
             <button class="nav-tab" data-page="agent" onclick="window.showPage('agent')">🤖 Agent</button>
             <button class="nav-tab" data-page="schedule" onclick="window.showPage('schedule')">📅 Schedule</button>
@@ -398,7 +399,43 @@
                 </div>
             </div>
             
-            <div class="page" id="tracesPage"><div id="tracesContainer"></div></div>
+            <div class="page" id="activityPage">
+                <div class="actions-header">
+                    <span>📊 Agent Activity</span>
+                    <span id="activityThrottleStatus"></span>
+                </div>
+                <div class="card" id="activitySummary" style="margin-bottom: 16px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
+                        <div>
+                            <div style="font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:4px;">External Actions (24h)</div>
+                            <div style="font-size:32px;font-weight:700;" id="activityCount">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Daily Limit</div>
+                            <div style="font-size:32px;font-weight:700;" id="activityLimit">30</div>
+                        </div>
+                        <div>
+                            <div style="font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Remaining</div>
+                            <div style="font-size:32px;font-weight:700;" id="activityRemaining">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Status</div>
+                            <div style="font-size:20px;font-weight:700;" id="activityStatus">-</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:16px;">
+                        <div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;">
+                            <div id="activityProgressBar" style="height:100%;background:rgba(255,255,255,0.8);border-radius:4px;transition:width 0.3s;width:0%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <h4 style="margin-bottom:14px;">📋 Recent External Actions</h4>
+                <div class="actions-list" id="activityList" style="max-height:500px;"></div>
+                <h4 style="margin-top:20px;margin-bottom:14px;">🏠 Internal Actions (not counted)</h4>
+                <div class="actions-list" id="activityInternalList" style="max-height:300px;"></div>
+            </div>
+            
+            <div id="tracesContainer"></div></div>
             
             <div class="page" id="agentPage">
                 <h3>🤖 Agent</h3>
@@ -719,7 +756,7 @@
                 loadSettingsForm();
 
                 const hash = window.location.hash.slice(1);
-                if (hash && ['dashboard', 'issues', 'actions', 'traces', 'agent', 'schedule', 'settings'].includes(hash)) {
+                if (hash && ['dashboard', 'issues', 'actions', 'activity', 'traces', 'agent', 'schedule', 'settings'].includes(hash)) {
                     window.showPage(hash);
                 } else if (!config.github.token) {
                     window.showPage('settings');
@@ -743,6 +780,7 @@
                 if (page === 'dashboard' && !pagesLoaded.dashboard) { loadDashboard(); pagesLoaded.dashboard = true; }
                 if (page === 'issues' && !pagesLoaded.issues) { loadIssues(); pagesLoaded.issues = true; }
                 if (page === 'actions' && !pagesLoaded.actions) { loadActions(); pagesLoaded.actions = true; }
+                if (page === 'activity' && !pagesLoaded.activity) { loadActivity(); pagesLoaded.activity = true; }
                 if (page === 'traces' && !pagesLoaded.traces) { loadTraces(); pagesLoaded.traces = true; }
                 if (page === 'agent' && !pagesLoaded.agent) { loadAgentConfig(); pagesLoaded.agent = true; }
                 if (page === 'schedule' && !pagesLoaded.schedule) { loadSchedule(); pagesLoaded.schedule = true; }
@@ -899,6 +937,7 @@
                     await Promise.all([
                         loadIssues(true),
                         loadActions(true),
+                        loadActivity(true),
                         loadTraces(true),
                         loadProjectBoard()
                     ]);
@@ -2093,7 +2132,195 @@
             function truncate(str, len) { return str?.length > len ? str.slice(0, len) + '...' : str || ''; }
             function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
             function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast show'; setTimeout(() => t.classList.remove('show'), 3000); }
-            document.addEventListener('keydown', e => { if (e.key === 'Escape') { window.closeIssueModal(); window.closeTraceModal(); window.closeScheduleModal(); } });
+            
+            // ============ ACTIVITY ============
+            let activityData = { external_events: [], internal_events: [] };
+            
+            async function loadActivity(silent = false) {
+                if (!config.github.token || !config.github.repo) {
+                    document.getElementById('activityList').innerHTML = '<div class="empty-state"><div class="empty-icon">⚙️</div><p>Configure GitHub in settings</p></div>';
+                    return;
+                }
+                
+                const listContainer = document.getElementById('activityList');
+                const internalContainer = document.getElementById('activityInternalList');
+                
+                if (!silent) {
+                    listContainer.innerHTML = '<div class="action-item"><div class="action-title">Loading activity...</div></div>';
+                }
+                
+                try {
+                    // Get the repo owner (agent username)
+                    const owner = config.github.repo.split('/')[0];
+                    
+                    // Fetch user events from GitHub API
+                    const res = await fetch(`https://api.github.com/users/${owner}/events?per_page=100`, {
+                        headers: { 'Authorization': `Bearer ${config.github.token}` }
+                    });
+                    
+                    if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+                    
+                    const events = await res.json();
+                    
+                    // Filter to last 24 hours
+                    const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                    
+                    // Throttled event types
+                    const throttledTypes = new Set([
+                        'IssueCommentEvent',
+                        'PullRequestReviewEvent',
+                        'PullRequestReviewCommentEvent',
+                        'IssuesEvent',
+                        'PullRequestEvent',
+                        'CommitCommentEvent',
+                        'CreateEvent',
+                        'DeleteEvent',
+                        'PushEvent'
+                    ]);
+                    
+                    const external = [];
+                    const internal = [];
+                    
+                    for (const event of events) {
+                        const createdAt = new Date(event.created_at);
+                        if (createdAt < threshold) continue;
+                        
+                        const eventType = event.type;
+                        if (!throttledTypes.has(eventType)) continue;
+                        
+                        const repoName = event.repo?.name || '';
+                        const isExternal = !repoName.startsWith(`${owner}/`);
+                        
+                        const eventSummary = {
+                            type: eventType,
+                            repo: repoName,
+                            created_at: event.created_at,
+                            action: event.payload?.action || '',
+                            url: getEventUrl(event),
+                            title: getEventTitle(event)
+                        };
+                        
+                        if (isExternal) {
+                            external.push(eventSummary);
+                        } else {
+                            internal.push(eventSummary);
+                        }
+                    }
+                    
+                    activityData = { external_events: external, internal_events: internal };
+                    
+                    // Update summary
+                    const limit = 30;
+                    const remaining = Math.max(0, limit - external.length);
+                    const canProceed = external.length < limit;
+                    
+                    document.getElementById('activityCount').textContent = external.length;
+                    document.getElementById('activityLimit').textContent = limit;
+                    document.getElementById('activityRemaining').textContent = remaining;
+                    document.getElementById('activityStatus').textContent = canProceed ? '✅ Active' : '🛑 Throttled';
+                    document.getElementById('activityStatus').style.color = canProceed ? 'rgba(255,255,255,0.9)' : 'rgba(255,200,200,0.9)';
+                    document.getElementById('activityThrottleStatus').innerHTML = `<span class="badge">${external.length}/${limit} today</span>`;
+                    
+                    // Progress bar
+                    const progress = Math.min(100, (external.length / limit) * 100);
+                    document.getElementById('activityProgressBar').style.width = `${progress}%`;
+                    document.getElementById('activityProgressBar').style.background = canProceed ? 'rgba(255,255,255,0.8)' : 'rgba(255,100,100,0.8)';
+                    
+                    // Render external events list
+                    if (external.length === 0) {
+                        listContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">🎉</div><p>No external actions in the last 24 hours</p></div>';
+                    } else {
+                        listContainer.innerHTML = external.map(evt => `
+                            <div class="action-item" ${evt.url ? `onclick="window.open('${evt.url}', '_blank')" style="cursor:pointer;"` : ''}>
+                                <div class="action-title">${getEventIcon(evt.type)} ${evt.title || evt.type}</div>
+                                <div class="action-meta">
+                                    <span>${evt.repo}</span> • 
+                                    <span>${formatDate(evt.created_at)}</span>
+                                    ${evt.action ? ` • <span>${evt.action}</span>` : ''}
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                    
+                    // Render internal events list
+                    if (internal.length === 0) {
+                        internalContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>No internal actions in the last 24 hours</p></div>';
+                    } else {
+                        internalContainer.innerHTML = internal.map(evt => `
+                            <div class="action-item" ${evt.url ? `onclick="window.open('${evt.url}', '_blank')" style="cursor:pointer;"` : ''}>
+                                <div class="action-title">${getEventIcon(evt.type)} ${evt.title || evt.type}</div>
+                                <div class="action-meta">
+                                    <span>${evt.repo}</span> • 
+                                    <span>${formatDate(evt.created_at)}</span>
+                                    ${evt.action ? ` • <span>${evt.action}</span>` : ''}
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                    
+                } catch (e) {
+                    console.error('Activity load error:', e);
+                    listContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Failed to load activity: ${e.message}</p></div>`;
+                }
+            }
+            
+            function getEventIcon(type) {
+                const icons = {
+                    'IssueCommentEvent': '💬',
+                    'PullRequestReviewEvent': '✅',
+                    'PullRequestReviewCommentEvent': '💭',
+                    'IssuesEvent': '🎫',
+                    'PullRequestEvent': '🔀',
+                    'CommitCommentEvent': '📝',
+                    'CreateEvent': '➕',
+                    'DeleteEvent': '🗑️',
+                    'PushEvent': '⬆️'
+                };
+                return icons[type] || '📌';
+            }
+            
+            function getEventUrl(event) {
+                const payload = event.payload || {};
+                if (payload.comment?.html_url) return payload.comment.html_url;
+                if (payload.issue?.html_url) return payload.issue.html_url;
+                if (payload.pull_request?.html_url) return payload.pull_request.html_url;
+                if (payload.review?.html_url) return payload.review.html_url;
+                return null;
+            }
+            
+            function getEventTitle(event) {
+                const payload = event.payload || {};
+                const type = event.type;
+                
+                if (type === 'IssueCommentEvent') {
+                    return `Comment on #${payload.issue?.number}: ${truncate(payload.issue?.title, 50)}`;
+                }
+                if (type === 'PullRequestReviewEvent') {
+                    return `Review on PR #${payload.pull_request?.number}: ${truncate(payload.pull_request?.title, 50)}`;
+                }
+                if (type === 'PullRequestReviewCommentEvent') {
+                    return `Review comment on PR #${payload.pull_request?.number}`;
+                }
+                if (type === 'IssuesEvent') {
+                    return `${payload.action} issue #${payload.issue?.number}: ${truncate(payload.issue?.title, 50)}`;
+                }
+                if (type === 'PullRequestEvent') {
+                    return `${payload.action} PR #${payload.pull_request?.number}: ${truncate(payload.pull_request?.title, 50)}`;
+                }
+                if (type === 'PushEvent') {
+                    const commits = payload.commits?.length || 0;
+                    return `Pushed ${commits} commit${commits !== 1 ? 's' : ''} to ${payload.ref?.replace('refs/heads/', '')}`;
+                }
+                if (type === 'CreateEvent') {
+                    return `Created ${payload.ref_type}: ${payload.ref || 'repository'}`;
+                }
+                if (type === 'DeleteEvent') {
+                    return `Deleted ${payload.ref_type}: ${payload.ref}`;
+                }
+                return type.replace('Event', '');
+            }
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { window.closeIssueModal(); window.closeTraceModal(); window.closeScheduleModal(); } });
         })();
     </script>
 </body>
