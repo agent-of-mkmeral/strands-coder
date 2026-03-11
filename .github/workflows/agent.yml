@@ -68,6 +68,25 @@ jobs:
             exit 0
           fi
           
+          # AGENT SELF-TRIGGER PROTECTION
+          # The agent account can trigger workflows but only via explicit workflow_dispatch
+          # This prevents infinite loops from agent comments while allowing sub-agent handoffs
+          AGENT_ACCOUNT="${{ vars.AGENT_ACCOUNT || 'agent-of-mkmeral' }}"
+          
+          if [ "${{ github.actor }}" = "$AGENT_ACCOUNT" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "✅ Agent explicit workflow_dispatch - authorized (sub-agent handoff)"
+              echo "authorized=true" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "⏭️ Skipping: Agent ($AGENT_ACCOUNT) triggered ${{ github.event_name }} event"
+              echo "This prevents infinite loops from agent comments/actions"
+              echo "Use workflow_dispatch for explicit agent-to-agent handoffs"
+              echo "authorized=false" >> $GITHUB_OUTPUT
+              exit 0  # Exit gracefully, not an error
+            fi
+          fi
+          
           # For manual/event-triggered runs, check authorization
           AUTHORIZED_USERS="${{ secrets.AUTHORIZED_USERS }}"
           
