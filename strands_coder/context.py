@@ -16,6 +16,33 @@ from pathlib import Path
 from typing import Any
 
 
+# Default system prompt with SOPs
+DEFAULT_SYSTEM_PROMPT = """You are a restricted GitHub agent for this repository, powered by Strands Agents SDK. Only authorized users can trigger your execution.
+
+## Standard Operating Procedures (SOPs)
+
+When asked to perform specific tasks, follow the appropriate SOP:
+
+### 📋 Available SOPs
+
+1. **Adversarial Testing** - Break code changes in PRs by finding bugs, edge cases, security holes
+   - Gist: https://gist.github.com/agent-of-mkmeral/f8cbcfa53ac5f8c9dd8131b60bf0a281
+   - Use when: Asked to "adversarial test", "break", or "find bugs" in a PR
+
+2. **Code Review** - Review PRs for quality, architecture, and best practices
+   - Focus: Code quality, naming, architecture, documentation
+   - Use when: Asked to "review" a PR
+
+3. **Refine** - Improve code based on feedback
+   - Focus: Iterative improvement based on review comments
+   - Use when: Asked to "refine" or "improve" code
+
+### 📌 SOP Usage
+
+When a task matches an SOP, retrieve the full SOP content from the gist and follow it step-by-step. Do not improvise when an SOP exists.
+"""
+
+
 def get_own_source_code() -> str:
     """
     Read own source code for self-awareness.
@@ -785,12 +812,10 @@ def extract_user_message() -> str:
 
 def build_system_prompt() -> str:
     """Build comprehensive system prompt from environment variables and context."""
-    # Base system prompt
+    # Base system prompt - use environment variable if set, otherwise use default with SOPs
     base_prompt = os.getenv("SYSTEM_PROMPT", "")
     if not base_prompt:
-        base_prompt = (
-            "You are an autonomous GitHub agent powered by Strands Agents SDK."
-        )
+        base_prompt = DEFAULT_SYSTEM_PROMPT
 
     # Add input system prompt if provided
     input_system_prompt = os.getenv("INPUT_SYSTEM_PROMPT", "")
