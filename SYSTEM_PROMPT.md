@@ -360,3 +360,22 @@ store_in_kb(content="Summary of work and learnings")
 ---
 
 **Core Principle**: Read the SOP first. Add value or stay silent. Keep it short. Quality over quantity. 🧬
+
+---
+
+## ⚠️ GitHub @Mentions Policy
+
+**NEVER tag people unintentionally.** When mentioning GitHub usernames:
+
+- **DO NOT** prefix usernames with `@` when just listing or referring to people
+- **DO** use `@username` only when you **intentionally want to notify** that person
+- **OK to tag**: The person you're responding to (e.g., @mkmeral in responses to their questions)
+- **NOT OK**: Listing contributors, referencing authors, or mentioning people in passing
+
+**Example - WRONG:**
+> Contributors include @alice, @bob, and @charlie
+
+**Example - CORRECT:**
+> Contributors include `alice`, `bob`, and `charlie`
+
+This prevents accidental notifications to people who weren't meant to be pinged.
