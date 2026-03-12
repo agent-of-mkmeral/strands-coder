@@ -16,31 +16,36 @@ from pathlib import Path
 from typing import Any
 
 
-# Default system prompt with SOPs
-DEFAULT_SYSTEM_PROMPT = """You are a restricted GitHub agent for this repository, powered by Strands Agents SDK. Only authorized users can trigger your execution.
-
-## Standard Operating Procedures (SOPs)
-
-When asked to perform specific tasks, follow the appropriate SOP:
-
-### 📋 Available SOPs
-
-1. **Adversarial Testing** - Break code changes in PRs by finding bugs, edge cases, security holes
-   - Gist: https://gist.github.com/agent-of-mkmeral/f8cbcfa53ac5f8c9dd8131b60bf0a281
-   - Use when: Asked to "adversarial test", "break", or "find bugs" in a PR
-
-2. **Code Review** - Review PRs for quality, architecture, and best practices
-   - Focus: Code quality, naming, architecture, documentation
-   - Use when: Asked to "review" a PR
-
-3. **Refine** - Improve code based on feedback
-   - Focus: Iterative improvement based on review comments
-   - Use when: Asked to "refine" or "improve" code
-
-### 📌 SOP Usage
-
-When a task matches an SOP, retrieve the full SOP content from the gist and follow it step-by-step. Do not improvise when an SOP exists.
-"""
+def get_default_system_prompt() -> str:
+    """
+    Read system prompt from SYSTEM_PROMPT.md file.
+    
+    The SYSTEM_PROMPT.md file at the repository root is the source of truth
+    for the agent's system prompt. This allows easy editing without code changes.
+    
+    Falls back to a minimal prompt if the file doesn't exist.
+    """
+    # Try to find SYSTEM_PROMPT.md relative to the repo root
+    # When running in GitHub Actions, we're in the repo root
+    # When running locally, we might be in the package dir
+    possible_paths = [
+        Path("SYSTEM_PROMPT.md"),  # Repo root (GitHub Actions)
+        Path(__file__).parent.parent / "SYSTEM_PROMPT.md",  # Relative to package
+    ]
+    
+    for prompt_path in possible_paths:
+        try:
+            if prompt_path.exists():
+                with open(prompt_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                print(f"✓ System prompt loaded from {prompt_path}")
+                return content
+        except Exception as e:
+            print(f"⚠ Failed to read {prompt_path}: {e}")
+    
+    # Fallback minimal prompt
+    print("⚠ SYSTEM_PROMPT.md not found, using minimal fallback")
+    return "You are a GitHub agent powered by Strands Agents SDK."
 
 
 def get_own_source_code() -> str:
@@ -815,7 +820,7 @@ def build_system_prompt() -> str:
     # Base system prompt - use environment variable if set, otherwise use default with SOPs
     base_prompt = os.getenv("SYSTEM_PROMPT", "")
     if not base_prompt:
-        base_prompt = DEFAULT_SYSTEM_PROMPT
+        base_prompt = get_default_system_prompt()
 
     # Add input system prompt if provided
     input_system_prompt = os.getenv("INPUT_SYSTEM_PROMPT", "")
