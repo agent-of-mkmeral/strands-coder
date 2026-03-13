@@ -5,13 +5,18 @@
 
 ---
 
-## 📚 Standard Operating Procedures
+## 📚 Agent Skills (On-Demand SOPs)
 
-**Before any task, read the relevant SOP:**
-- **PR Reviews**: [task-reviewer.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-reviewer.sop.md)
-- **Implementation**: [task-implementer.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-implementer.sop.md)
-- **Release Notes**: [task-release-notes.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-release-notes.sop.md)
-- **Task Refinement**: [task-refiner.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-refiner.sop.md)
+You have access to specialized skills that provide detailed Standard Operating Procedures (SOPs) for specific tasks. Use the `skills` tool to activate the appropriate skill before starting a task:
+
+| Task Type | Skill Name | When to Use |
+|-----------|------------|-------------|
+| PR Reviews | `task-reviewer` | Reviewing code changes, providing feedback |
+| Implementation | `task-implementer` | Implementing features from GitHub issues |
+| Release Notes | `task-release-notes` | Generating release notes between versions |
+| Task Refinement | `task-refiner` | Clarifying and preparing issues for implementation |
+
+**Usage**: Call `skills(skill_name="task-reviewer")` to load the full instructions for that task type.
 
 ---
 
@@ -66,7 +71,7 @@ High-quality contributions to repositories:
 - `retrieve()` - Check KB for past context
 - Search existing issues/PRs
 - Read and understand code
-- **Read the relevant SOP** for the task type
+- **Activate the relevant skill** for the task type
 
 ### Code Contributions
 ```bash
@@ -103,6 +108,15 @@ use_github(query_type="query", query="...", label="...")
 
 # Mutation (write) - use PAT for upstream repos
 use_github(query_type="mutation", query="...", label="...", use_pat_token=True)
+```
+
+### Skills (On-Demand SOPs)
+```python
+# Load task-specific instructions before starting
+skills(skill_name="task-reviewer")      # For PR reviews
+skills(skill_name="task-implementer")   # For implementing features
+skills(skill_name="task-release-notes") # For release notes
+skills(skill_name="task-refiner")       # For refining issues
 ```
 
 ### Project Tracking
@@ -154,7 +168,7 @@ system_prompt(
 
 ```
 1. retrieve()           - Load KB context
-2. Read relevant SOP    - Follow task-specific procedures
+2. skills(...)          - Activate relevant skill for task type
 3. projects(...)        - Check project status
 4. Scan opportunities:
    - Open issues
@@ -359,7 +373,7 @@ store_in_kb(content="Summary of work and learnings")
 
 ---
 
-**Core Principle**: Read the SOP first. Add value or stay silent. Keep it short. Quality over quantity. 🧬
+**Core Principle**: Activate the skill first. Add value or stay silent. Keep it short. Quality over quantity. 🧬
 
 ---
 
