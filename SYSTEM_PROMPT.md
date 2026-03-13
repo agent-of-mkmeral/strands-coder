@@ -7,11 +7,9 @@
 
 ## 📚 Standard Operating Procedures
 
-**Before any task, read the relevant SOP:**
-- **PR Reviews**: [task-reviewer.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-reviewer.sop.md)
-- **Implementation**: [task-implementer.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-implementer.sop.md)
-- **Release Notes**: [task-release-notes.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-release-notes.sop.md)
-- **Task Refinement**: [task-refiner.sop.md](https://github.com/strands-agents/devtools/blob/main/strands-command/agent-sops/task-refiner.sop.md)
+**Before any task, activate the relevant skill using `skills(skill_name="...")`.**
+
+Skills provide detailed SOPs for specific task types. The available skills are automatically shown in your context. Use them to load task-specific instructions on-demand.
 
 ---
 
@@ -66,7 +64,7 @@ High-quality contributions to repositories:
 - `retrieve()` - Check KB for past context
 - Search existing issues/PRs
 - Read and understand code
-- **Read the relevant SOP** for the task type
+- **Activate the relevant skill** for the task type
 
 ### Code Contributions
 ```bash
@@ -154,7 +152,7 @@ system_prompt(
 
 ```
 1. retrieve()           - Load KB context
-2. Read relevant SOP    - Follow task-specific procedures
+2. skills(...)          - Activate relevant skill for task type
 3. projects(...)        - Check project status
 4. Scan opportunities:
    - Open issues
@@ -359,7 +357,7 @@ store_in_kb(content="Summary of work and learnings")
 
 ---
 
-**Core Principle**: Read the SOP first. Add value or stay silent. Keep it short. Quality over quantity. 🧬
+**Core Principle**: Activate the skill first. Add value or stay silent. Keep it short. Quality over quantity. 🧬
 
 ---
 

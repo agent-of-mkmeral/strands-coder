@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import sys
+from pathlib import Path
 
 from strands import Agent
 from strands.session import S3SessionManager
@@ -177,6 +178,48 @@ def load_mcp_servers() -> list:
         return []
 
 
+def load_skills_plugin():
+    """Load the AgentSkills plugin if skills directory exists."""
+    try:
+        from strands.vended_plugins.skills import AgentSkills
+
+        # Look for skills directory in multiple locations
+        possible_paths = [
+            Path("skills"),  # Current directory (GitHub Actions)
+            Path(__file__).parent.parent / "skills",  # Relative to package
+        ]
+
+        skills_dir = None
+        for path in possible_paths:
+            if path.exists() and path.is_dir():
+                skills_dir = path
+                break
+
+        if skills_dir is None:
+            print("⚠ No skills directory found")
+            return None
+
+        # Load all skills from the directory
+        plugin = AgentSkills(skills=str(skills_dir))
+        skills = plugin.get_available_skills()
+
+        if skills:
+            print(f"✓ AgentSkills plugin: {len(skills)} skills loaded")
+            for skill in skills:
+                print(f"  - {skill.name}: {skill.description[:60]}...")
+        else:
+            print("⚠ AgentSkills plugin: no skills found")
+            return None
+
+        return plugin
+    except ImportError as e:
+        print(f"⚠ AgentSkills plugin not available: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠ Failed to load skills: {e}")
+        return None
+
+
 def extract_issue_id() -> str | None:
     """
     Extract issue ID from GitHub context.
@@ -242,6 +285,13 @@ def run_agent(prompt: str) -> None:
                 has_mcp_servers = True
                 tools.extend(mcp_servers)
 
+        # Plugins (including AgentSkills)
+        plugins = []
+        if os.getenv("STRANDS_LOAD_SKILLS", "true").lower() == "true":
+            skills_plugin = load_skills_plugin()
+            if skills_plugin:
+                plugins.append(skills_plugin)
+
         # Model and session
         model = create_model(provider=os.getenv("STRANDS_PROVIDER", "bedrock"))
         session_id = (
@@ -272,6 +322,7 @@ def run_agent(prompt: str) -> None:
             model=model,
             system_prompt=build_system_prompt(),
             tools=tools,
+            plugins=plugins if plugins else None,
             session_manager=session_manager,
             load_tools_from_directory=os.getenv(
                 "STRANDS_TOOLS_DIRECTORY", "false"
@@ -288,7 +339,7 @@ def run_agent(prompt: str) -> None:
             },
         )
 
-        print(f"Agent created with {len(tools)} tools")
+        print(f"Agent created with {len(tools)} tools and {len(plugins)} plugins")
 
         # Extract actual user message from GitHub context
         user_message = extract_user_message()
@@ -330,6 +381,8 @@ def run_agent(prompt: str) -> None:
                         f.write(f"**Issue ID:** `{issue_id}` (traces linked)\n")
                     if kb_id:
                         f.write(f"**Knowledge Base:** `{kb_id}`\n")
+                    if plugins:
+                        f.write(f"**Plugins:** {len(plugins)} loaded (AgentSkills)\n")
                     f.write(
                         f"**System Prompt:** \n<details>\n{agent.system_prompt}\n</details>"
                     )
@@ -396,6 +449,7 @@ Environment Variables:
   STRANDS_PROVIDER         Model provider (default: bedrock)
   STRANDS_MODEL_ID         Model identifier
   STRANDS_TOOLS            Tools config (format: pkg:tool1,tool2;pkg2:tool3)
+  STRANDS_LOAD_SKILLS      Load AgentSkills plugin (default: true)
   SYSTEM_PROMPT            Base system prompt
   STRANDS_KNOWLEDGE_BASE_ID  AWS Bedrock Knowledge Base ID for RAG
   S3_SESSION_BUCKET        S3 bucket for session persistence
