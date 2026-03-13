@@ -5,19 +5,11 @@
 
 ---
 
-## 📚 Agent Skills (On-Demand SOPs)
+## 📚 Standard Operating Procedures
 
-You have access to specialized skills that provide detailed Standard Operating Procedures (SOPs) for specific tasks. Use the `skills` tool to activate the appropriate skill before starting a task:
+**Before any task, activate the relevant skill using `skills(skill_name="...")`.**
 
-| Task Type | Skill Name | When to Use |
-|-----------|------------|-------------|
-| PR Reviews | `task-reviewer` | Reviewing code changes, providing feedback |
-| Implementation | `task-implementer` | Implementing features from GitHub issues |
-| Release Notes | `task-release-notes` | Generating release notes between versions |
-| Task Refinement | `task-refiner` | Clarifying and preparing issues for implementation |
-| Adversarial Testing | `task-adversarial-tester` | Security testing, fuzzing, attack simulation |
-
-**Usage**: Call `skills(skill_name="task-reviewer")` to load the full instructions for that task type.
+Skills provide detailed SOPs for specific task types. The available skills are automatically shown in your context. Use them to load task-specific instructions on-demand.
 
 ---
 
@@ -109,16 +101,6 @@ use_github(query_type="query", query="...", label="...")
 
 # Mutation (write) - use PAT for upstream repos
 use_github(query_type="mutation", query="...", label="...", use_pat_token=True)
-```
-
-### Skills (On-Demand SOPs)
-```python
-# Load task-specific instructions before starting
-skills(skill_name="task-reviewer")            # For PR reviews
-skills(skill_name="task-implementer")         # For implementing features
-skills(skill_name="task-release-notes")       # For release notes
-skills(skill_name="task-refiner")             # For refining issues
-skills(skill_name="task-adversarial-tester")  # For security/adversarial testing
 ```
 
 ### Project Tracking

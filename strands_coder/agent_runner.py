@@ -4,14 +4,11 @@ Strands Action
 Agent runner for GitHub Actions.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from strands import Agent
 from strands.session import S3SessionManager
@@ -19,9 +16,6 @@ from strands.telemetry import StrandsTelemetry
 from strands_tools.utils.models.model import create_model
 
 from strands_coder.context import build_system_prompt, extract_user_message
-
-if TYPE_CHECKING:
-    from strands.vended_plugins.skills import AgentSkills
 
 # Environment defaults
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
@@ -41,11 +35,15 @@ def setup_otel() -> None:
         secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "")
 
         if public_key and secret_key:
-            auth_token = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+            auth_token = base64.b64encode(
+                f"{public_key}:{secret_key}".encode()
+            ).decode()
             otel_endpoint = f"{langfuse_host}/api/public/otel"
 
             os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = otel_endpoint
-            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {auth_token}"
+            os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = (
+                f"Authorization=Basic {auth_token}"
+            )
             print(f"✓ Langfuse OTEL: {langfuse_host}")
 
     # Generic OTEL configuration
@@ -125,7 +123,9 @@ def load_mcp_servers() -> list:
 
                 # Get disabled tools list and convert to tool_filters format
                 disabled_tools = cfg.get("disabledTools", [])
-                tool_filters = ToolFilters(rejected=disabled_tools) if disabled_tools else None
+                tool_filters = (
+                    ToolFilters(rejected=disabled_tools) if disabled_tools else None
+                )
 
                 if "command" in cfg:
                     command = cfg["command"]
@@ -133,7 +133,9 @@ def load_mcp_servers() -> list:
                     env = cfg.get("env")
 
                     def transport(_cmd: str = command, _args: list = args, _env: dict | None = env):  # type: ignore[no-untyped-def]
-                        return stdio_client(StdioServerParameters(command=_cmd, args=_args, env=_env))
+                        return stdio_client(
+                            StdioServerParameters(command=_cmd, args=_args, env=_env)
+                        )
 
                     client = MCPClient(
                         transport_callable=transport,
@@ -145,7 +147,11 @@ def load_mcp_servers() -> list:
                     headers = cfg.get("headers")
 
                     def transport_http(_url: str = url, _headers: dict | None = headers):  # type: ignore[no-untyped-def]
-                        return sse_client(_url) if "/sse" in _url else streamablehttp_client(url=_url, headers=_headers)
+                        return (
+                            sse_client(_url)
+                            if "/sse" in _url
+                            else streamablehttp_client(url=_url, headers=_headers)
+                        )
 
                     client = MCPClient(
                         transport_callable=transport_http,
@@ -158,7 +164,9 @@ def load_mcp_servers() -> list:
                 clients.append(client)
 
                 if disabled_tools:
-                    print(f"✓ MCP server '{name}' (disabled: {', '.join(disabled_tools)})")
+                    print(
+                        f"✓ MCP server '{name}' (disabled: {', '.join(disabled_tools)})"
+                    )
                 else:
                     print(f"✓ MCP server '{name}'")
             except Exception as e:
@@ -170,7 +178,7 @@ def load_mcp_servers() -> list:
         return []
 
 
-def load_skills_plugin() -> AgentSkills | None:
+def load_skills_plugin():
     """Load the AgentSkills plugin if skills directory exists."""
     try:
         from strands.vended_plugins.skills import AgentSkills
@@ -264,11 +272,7 @@ def run_agent(prompt: str) -> None:
         setup_otel()
 
         # Tool loading with defaults (minimal core tools)
-        default_tools = (
-            "strands_tools:shell,retrieve,use_agent;"
-            "strands_coder:use_github,system_prompt,store_in_kb,"
-            "create_subagent,projects,scheduler"
-        )
+        default_tools = "strands_tools:shell,retrieve,use_agent;strands_coder:use_github,system_prompt,store_in_kb,create_subagent,projects,scheduler"
         tools_config = os.getenv("STRANDS_TOOLS", default_tools)
 
         print(f"Loading tools: {tools_config}")
@@ -320,7 +324,10 @@ def run_agent(prompt: str) -> None:
             tools=tools,
             plugins=plugins if plugins else None,
             session_manager=session_manager,
-            load_tools_from_directory=os.getenv("STRANDS_TOOLS_DIRECTORY", "false").lower() == "true",
+            load_tools_from_directory=os.getenv(
+                "STRANDS_TOOLS_DIRECTORY", "false"
+            ).lower()
+            == "true",
             trace_attributes={
                 "session.id": session_id,
                 "user.id": os.getenv("GITHUB_ACTOR", "unknown"),
@@ -376,7 +383,9 @@ def run_agent(prompt: str) -> None:
                         f.write(f"**Knowledge Base:** `{kb_id}`\n")
                     if plugins:
                         f.write(f"**Plugins:** {len(plugins)} loaded (AgentSkills)\n")
-                    f.write(f"**System Prompt:** \n<details>\n{agent.system_prompt}\n</details>")
+                    f.write(
+                        f"**System Prompt:** \n<details>\n{agent.system_prompt}\n</details>"
+                    )
             except Exception as e:
                 print(f"Failed to write summary: {e}")
 
@@ -407,7 +416,11 @@ def run_agent(prompt: str) -> None:
 
         # Use os._exit() when MCP servers present (background threads need force-kill)
         # Unless PYTEST_CURRENT_TEST is set (testing mode), use sys.exit() for proper cleanup
-        if "has_mcp_servers" in locals() and has_mcp_servers and not os.getenv("PYTEST_CURRENT_TEST"):
+        if (
+            "has_mcp_servers" in locals()
+            and has_mcp_servers
+            and not os.getenv("PYTEST_CURRENT_TEST")
+        ):
             os._exit(1)
         else:
             sys.exit(1)
@@ -464,7 +477,9 @@ For more info: https://github.com/strands-agents/strands-action
             if args.prompt:
                 prompt = " ".join(args.prompt)
             else:
-                parser.error("Prompt required via STRANDS_PROMPT env var or command-line argument")
+                parser.error(
+                    "Prompt required via STRANDS_PROMPT env var or command-line argument"
+                )
 
         if not prompt.strip():
             parser.error("Prompt cannot be empty")
