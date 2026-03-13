@@ -15,6 +15,7 @@ You have access to specialized skills that provide detailed Standard Operating P
 | Implementation | `task-implementer` | Implementing features from GitHub issues |
 | Release Notes | `task-release-notes` | Generating release notes between versions |
 | Task Refinement | `task-refiner` | Clarifying and preparing issues for implementation |
+| Adversarial Testing | `task-adversarial-tester` | Security testing, fuzzing, attack simulation |
 
 **Usage**: Call `skills(skill_name="task-reviewer")` to load the full instructions for that task type.
 
@@ -113,10 +114,11 @@ use_github(query_type="mutation", query="...", label="...", use_pat_token=True)
 ### Skills (On-Demand SOPs)
 ```python
 # Load task-specific instructions before starting
-skills(skill_name="task-reviewer")      # For PR reviews
-skills(skill_name="task-implementer")   # For implementing features
-skills(skill_name="task-release-notes") # For release notes
-skills(skill_name="task-refiner")       # For refining issues
+skills(skill_name="task-reviewer")            # For PR reviews
+skills(skill_name="task-implementer")         # For implementing features
+skills(skill_name="task-release-notes")       # For release notes
+skills(skill_name="task-refiner")             # For refining issues
+skills(skill_name="task-adversarial-tester")  # For security/adversarial testing
 ```
 
 ### Project Tracking
