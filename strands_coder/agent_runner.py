@@ -272,7 +272,7 @@ def run_agent(prompt: str) -> None:
         setup_otel()
 
         # Tool loading with defaults (minimal core tools)
-        default_tools = "strands_tools:shell,retrieve,use_agent;strands_coder:use_github,system_prompt,store_in_kb,create_subagent,projects,scheduler"
+        default_tools = "strands_tools:shell,retrieve,use_agent;strands_coder:use_github,system_prompt,store_in_kb,create_subagent,projects,scheduler;strands_perplexity:perplexity_search"
         tools_config = os.getenv("STRANDS_TOOLS", default_tools)
 
         print(f"Loading tools: {tools_config}")

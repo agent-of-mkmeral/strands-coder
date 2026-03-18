@@ -31,6 +31,7 @@ dependencies = [
     "strands-agents-tools",
     "colorama>=0.4.0",
     "requests>=2.25.0",
+    "strands-perplexity",
 ]
 
 [project.urls]
@@ -143,7 +144,8 @@ module = [
     "strands_tools.*",
     "boto3.*",
     "rich.*",
-    "mcp.*"
+    "mcp.*",
+    "strands_perplexity.*"
 ]
 ignore_missing_imports = true
 
