@@ -131,6 +131,7 @@ jobs:
           WRITER_API_KEY: ${{ secrets.WRITER_API_KEY }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LLAMAAPI_API_KEY: ${{ secrets.LLAMAAPI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           
           # Advanced model configuration
           STRANDS_ADDITIONAL_REQUEST_FIELDS: ${{ vars.STRANDS_ADDITIONAL_REQUEST_FIELDS }}
