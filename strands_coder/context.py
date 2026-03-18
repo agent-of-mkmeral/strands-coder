@@ -774,17 +774,17 @@ def extract_user_message() -> str:
     action = event.get("action", "")
 
     # Issue comment created
-    if event_name == "issue_comment" and action in ["created", "edited"]:
+    if event_name == "issue_comment" and action in ["created"]:
         comment = event.get("comment", {})
         return comment.get("body", "")
 
     # Issue opened/edited
-    elif event_name == "issues" and action in ["opened", "edited", "reopened"]:
+    elif event_name == "issues" and action in ["opened"]:
         issue = event.get("issue", {})
         return issue.get("body", "")
 
     # PR opened/edited
-    elif event_name == "pull_request" and action in ["opened", "edited", "reopened"]:
+    elif event_name == "pull_request" and action in ["opened", "synchronize", "ready_for_review"]:
         pr = event.get("pull_request", {})
         return pr.get("body", "")
 
@@ -796,18 +796,17 @@ def extract_user_message() -> str:
     # PR review comment
     elif event_name == "pull_request_review_comment" and action in [
         "created",
-        "edited",
     ]:
         comment = event.get("comment", {})
         return comment.get("body", "")
 
     # Discussion created/edited
-    elif event_name == "discussion" and action in ["created", "edited"]:
+    elif event_name == "discussion" and action in ["created"]:
         discussion = event.get("discussion", {})
         return discussion.get("body", "")
 
     # Discussion comment
-    elif event_name == "discussion_comment" and action in ["created", "edited"]:
+    elif event_name == "discussion_comment" and action in ["created"]:
         comment = event.get("comment", {})
         return comment.get("body", "")
 
