@@ -39,11 +39,11 @@ on:
         required: false
         type: string
       model:
-        description: 'Model ID (empty = use repo vars or provider default)'
+        description: 'Model ID (empty = use repo vars [Claude Opus 4.6 with adaptive thinking and 1M context])'
         required: false
         type: string
       max_tokens:
-        description: 'Max tokens (empty = use repo vars or provider default)'
+        description: 'Max tokens (empty = use repo vars [128000])'
         required: false
         type: string
 
