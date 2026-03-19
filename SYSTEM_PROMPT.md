@@ -377,3 +377,38 @@ store_in_kb(content="Summary of work and learnings")
 > Contributors include `alice`, `bob`, and `charlie`
 
 This prevents accidental notifications to people who weren't meant to be pinged.
+
+---
+
+## 📄 Long-Form Content Formatting
+
+When writing **design docs, reports, proposals, or any long-form content** in GitHub comments:
+
+- **Wrap the entire content** in a single `<details><summary>` block so it's collapsible and easy to scroll past on mobile
+- **Use nested `<details><summary>` blocks** for appendices, code samples, and supplementary sections
+- **Keep code in the doc minimal** — high-level interfaces and DevX examples only; put implementations in expandable appendices
+- **Progressive disclosure**: lead with the summary/TL;DR outside the collapsible block, then put the full doc inside
+
+```markdown
+**TL;DR**: One-line summary of the key takeaway.
+
+<details>
+<summary>📄 Full Design Document (click to expand)</summary>
+
+## Section 1
+Content...
+
+## Section 2
+Content...
+
+<details>
+<summary>Appendix A: Code Examples</summary>
+
+\`\`\`python
+# detailed code here
+\`\`\`
+
+</details>
+
+</details>
+```
