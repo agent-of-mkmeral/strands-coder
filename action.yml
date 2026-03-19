@@ -146,10 +146,10 @@ runs:
         STRANDS_PROVIDER: ${{ inputs.provider }}
         STRANDS_MODEL_ID: ${{ inputs.model }}
         STRANDS_MAX_TOKENS: ${{ inputs.max_tokens }}
-        STRANDS_ADDITIONAL_REQUEST_FIELDS: ${{ inputs.additional_request_fields }}
-        STRANDS_TOOLS: ${{ inputs.tools }}
+        STRANDS_ADDITIONAL_REQUEST_FIELDS: ${{ inputs.additional_request_fields || env.STRANDS_ADDITIONAL_REQUEST_FIELDS }}
+        STRANDS_TOOLS: ${{ inputs.tools || env.STRANDS_TOOLS }}
         SYSTEM_PROMPT: ${{ inputs.system_prompt }}
-        MCP_SERVERS: ${{ inputs.mcp_servers }}
+        MCP_SERVERS: ${{ inputs.mcp_servers || env.MCP_SERVERS }}
         STRANDS_PROMPT: ${{ inputs.prompt }}
         PYTHONPATH: ${{ github.action_path }}
         VIRTUAL_ENV: ${{ github.action_path }}/.venv
