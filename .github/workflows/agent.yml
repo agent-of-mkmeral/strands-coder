@@ -34,18 +34,6 @@ on:
         description: 'Tool config (e.g., strands_tools:shell;strands_coder:use_github)'
         required: false
         type: string
-      provider:
-        description: 'Model provider (empty = use repo vars or bedrock default)'
-        required: false
-        type: string
-      model:
-        description: 'Model ID (empty = use repo vars [Claude Opus 4.6 with adaptive thinking and 1M context])'
-        required: false
-        type: string
-      max_tokens:
-        description: 'Max tokens (empty = use repo vars [128000])'
-        required: false
-        type: string
 
 permissions: write-all
 
@@ -53,8 +41,8 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     # Model config from repository variables — the single source of truth.
-    # Workflow dispatch inputs override these only when explicitly provided.
-    # If vars aren't set either, create_model() uses sensible per-provider defaults.
+    # Provider, model ID, and max tokens are ALL controlled via repo vars.
+    # No workflow-level overrides. Change vars.* to change the model.
     env:
       STRANDS_PROVIDER: ${{ vars.STRANDS_PROVIDER || 'bedrock' }}
       STRANDS_MODEL_ID: ${{ vars.STRANDS_MODEL_ID }}
@@ -174,13 +162,6 @@ jobs:
               (github.event_name == 'schedule' && 'I am running on a scheduled basis (every 4 hours). I will check the repository status, review open issues and PRs, and provide insights or suggestions for improvements, work on active tracked tasks and discover new opportunities to work on. I have full GitHub context available.') ||
               'I received a GitHub event and am running autonomously. I will analyze the context and take appropriate action. I have full GitHub event details available.'
             }}
-
-          # Model configuration — only pass workflow_dispatch inputs (override env vars).
-          # If not dispatched with explicit values, action.yml sees empty → env vars from
-          # this workflow's env block (set from vars.*) flow through untouched.
-          provider: ${{ github.event.inputs.provider || '' }}
-          model: ${{ github.event.inputs.model || '' }}
-          max_tokens: ${{ github.event.inputs.max_tokens || '' }}
 
           # System prompt configuration
           system_prompt: ${{ github.event.inputs.system_prompt || vars.SYSTEM_PROMPT || vars.INPUT_SYSTEM_PROMPT || 'You are a restricted GitHub agent for this repository, powered by Strands Agents SDK. Only authorized users can trigger your execution.' }}

@@ -11,16 +11,6 @@ inputs:
     description: 'Task for the AI agent to perform'
     required: true
   
-  provider:
-    description: 'AI provider (bedrock, github, openai, anthropic). If empty, uses STRANDS_PROVIDER env var or bedrock default.'
-    required: false
-    default: ''
-  
-  model:
-    description: 'Model ID. If empty, uses STRANDS_MODEL_ID env var or provider default.'
-    required: false
-    default: ''
-  
   tools:
     description: 'Tool config string (e.g., strands_tools:shell,file_read;strands_action:gist)'
     required: false
@@ -28,11 +18,6 @@ inputs:
   
   system_prompt:
     description: 'System prompt'
-    required: false
-    default: ''
-  
-  max_tokens:
-    description: 'Maximum tokens for model response. If empty, uses STRANDS_MAX_TOKENS env var or provider default.'
     required: false
     default: ''
   
@@ -98,7 +83,7 @@ runs:
         git config --global user.email "${{ inputs.git_user_email }}"
 
     - name: Configure AWS (Bedrock only)
-      if: (inputs.provider == 'bedrock' || inputs.provider == '') && inputs.aws_role_arn != ''
+      if: inputs.aws_role_arn != ''
       uses: aws-actions/configure-aws-credentials@v5
       with:
         role-to-assume: ${{ inputs.aws_role_arn }}
@@ -143,10 +128,8 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         GITHUB_CONTEXT: ${{ toJson(github) }}
-        # Model config inputs stored as _INPUT vars — only applied if non-empty (see run script)
-        _PROVIDER_INPUT: ${{ inputs.provider }}
-        _MODEL_INPUT: ${{ inputs.model }}
-        _MAX_TOKENS_INPUT: ${{ inputs.max_tokens }}
+        # Model config comes entirely from env vars set by the calling workflow.
+        # STRANDS_PROVIDER, STRANDS_MODEL_ID, STRANDS_MAX_TOKENS flow through untouched.
         STRANDS_ADDITIONAL_REQUEST_FIELDS: ${{ inputs.additional_request_fields || env.STRANDS_ADDITIONAL_REQUEST_FIELDS }}
         STRANDS_TOOLS: ${{ inputs.tools || env.STRANDS_TOOLS }}
         SYSTEM_PROMPT: ${{ inputs.system_prompt }}
@@ -155,14 +138,7 @@ runs:
         PYTHONPATH: ${{ github.action_path }}
         VIRTUAL_ENV: ${{ github.action_path }}/.venv
       run: |
-        # Only override model config env vars if explicitly provided via inputs.
-        # This allows the calling workflow's env block (from vars.*) to be the source of truth.
-        # If neither input nor env var is set, create_model() uses sensible per-provider defaults.
-        [ -n "$_PROVIDER_INPUT" ] && export STRANDS_PROVIDER="$_PROVIDER_INPUT"
-        [ -n "$_MODEL_INPUT" ] && export STRANDS_MODEL_ID="$_MODEL_INPUT"
-        [ -n "$_MAX_TOKENS_INPUT" ] && export STRANDS_MAX_TOKENS="$_MAX_TOKENS_INPUT"
-
-        echo "🔧 Model config: STRANDS_PROVIDER=${STRANDS_PROVIDER:-<env/default>} STRANDS_MODEL_ID=${STRANDS_MODEL_ID:-<env/default>} STRANDS_MAX_TOKENS=${STRANDS_MAX_TOKENS:-<env/default>}"
+        echo "🔧 Model config: STRANDS_PROVIDER=${STRANDS_PROVIDER:-<default>} STRANDS_MODEL_ID=${STRANDS_MODEL_ID:-<default>} STRANDS_MAX_TOKENS=${STRANDS_MAX_TOKENS:-<default>}"
 
         if [ -f "${{ github.action_path }}/custom_agent_runner.py" ]; then
           "${{ github.action_path }}/.venv/bin/python" "${{ github.action_path }}/custom_agent_runner.py"
