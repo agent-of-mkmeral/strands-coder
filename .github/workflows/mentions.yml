@@ -87,10 +87,27 @@ jobs:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MENTIONS: ${{ steps.check-mentions.outputs.mentions }}
+          AUTHORIZED_USERS: ${{ secrets.AUTHORIZED_USERS }}
         run: |
           TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
           
           echo "🚀 Processing mentions..."
+          
+          # ============================================================
+          # Authorization check function
+          # Verifies the mentioning user is in the AUTHORIZED_USERS list
+          # ============================================================
+          is_authorized() {
+            local author="$1"
+            if [ -z "$author" ] || [ "$author" = "null" ]; then
+              return 1  # Not authorized (unknown user)
+            fi
+            if [[ ",$AUTHORIZED_USERS," == *",$author,"* ]]; then
+              return 0  # Authorized
+            else
+              return 1  # Not authorized
+            fi
+          }
           
           # Process each mention
           echo "$MENTIONS" | jq -c '.[]' | while read -r mention; do
@@ -104,46 +121,6 @@ jobs:
             echo ""
             echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE (reason: $REASON)"
             
-            # ============================================================
-            # FAST PATH: If GitHub says reason is "mention", trust it!
-            # GitHub's notification API already verified the mention.
-            # ============================================================
-            if [ "$REASON" = "mention" ] || [ "$REASON" = "team_mention" ]; then
-              echo "  ✅ GitHub notification reason is '$REASON' — dispatching directly"
-              
-              # Get issue/PR number from the API
-              CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "$SUBJECT_URL")
-              NUMBER=$(echo "$CONTENT" | jq -r '.number')
-              
-              curl -s -X POST \
-                -H "Authorization: Bearer $TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                -d "{
-                  \"ref\": \"main\",
-                  \"inputs\": {
-                    \"prompt\": \"I was mentioned (reason: $REASON) in $REPO#$NUMBER. Please check the issue/PR and respond appropriately. URL: https://github.com/$REPO/issues/$NUMBER\"
-                  }
-                }"
-              
-              echo "  ✅ Workflow dispatched (fast path)"
-              
-              # Mark notification as read
-              echo "  📖 Marking notification as read..."
-              curl -s -X PATCH \
-                -H "Authorization: Bearer $TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
-              
-              continue
-            fi
-            
-            # ============================================================
-            # SLOW PATH: For other reasons, search for @agent-of-mkmeral
-            # ============================================================
-            
             # Get the actual issue/PR content
             CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
               -H "Accept: application/vnd.github+json" \
@@ -151,31 +128,22 @@ jobs:
             
             BODY=$(echo "$CONTENT" | jq -r '.body // ""')
             NUMBER=$(echo "$CONTENT" | jq -r '.number')
-            FOUND_MENTION="false"
+            MENTION_AUTHOR=""
+            MENTION_SOURCE=""
+            
+            # ============================================================
+            # Search all locations for @agent-of-mkmeral mention + author
+            # ============================================================
             
             # Check 1: Issue/PR body
             if echo "$BODY" | grep -qi "@agent-of-mkmeral"; then
-              echo "  ✅ Found @agent-of-mkmeral mention in body"
-              FOUND_MENTION="true"
-              
-              curl -s -X POST \
-                -H "Authorization: Bearer $TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                -d "{
-                  \"ref\": \"main\",
-                  \"inputs\": {
-                    \"prompt\": \"I was mentioned in $REPO#$NUMBER. Please check the issue/PR and respond appropriately. URL: https://github.com/$REPO/issues/$NUMBER\"
-                  }
-                }"
-              
-              echo "  ✅ Workflow dispatched"
+              MENTION_AUTHOR=$(echo "$CONTENT" | jq -r '.user.login // ""')
+              MENTION_SOURCE="body"
+              echo "  🔍 Found mention in body by @$MENTION_AUTHOR"
             fi
             
             # Check 2: Issue/PR comments
-            if [ "$FOUND_MENTION" = "false" ]; then
-              echo "  ⏭️ No direct mention in body, checking comments..."
-              
+            if [ -z "$MENTION_AUTHOR" ]; then
               COMMENTS_URL=$(echo "$CONTENT" | jq -r '.comments_url // ""')
               if [ -n "$COMMENTS_URL" ] && [ "$COMMENTS_URL" != "null" ]; then
                 LATEST_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -187,35 +155,17 @@ jobs:
                 ')
                 
                 if [ -n "$MENTION_COMMENT" ]; then
-                  COMMENT_AUTHOR=$(echo "$LATEST_COMMENTS" | jq -r '
+                  MENTION_AUTHOR=$(echo "$LATEST_COMMENTS" | jq -r '
                     [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last | .user.login // ""
                   ')
-                  
-                  echo "  ✅ Found @agent-of-mkmeral mention in comment by @$COMMENT_AUTHOR"
-                  FOUND_MENTION="true"
-                  
-                  curl -s -X POST \
-                    -H "Authorization: Bearer $TOKEN" \
-                    -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                    -d "{
-                      \"ref\": \"main\",
-                      \"inputs\": {
-                        \"prompt\": \"I was mentioned by @$COMMENT_AUTHOR in $REPO#$NUMBER. Please respond to this mention. URL: https://github.com/$REPO/issues/$NUMBER\"
-                      }
-                    }"
-                  
-                  echo "  ✅ Workflow dispatched"
-                else
-                  echo "  ⏭️ No @agent-of-mkmeral mention found in comments"
+                  MENTION_SOURCE="comment"
+                  echo "  🔍 Found mention in comment by @$MENTION_AUTHOR"
                 fi
               fi
             fi
             
             # Check 3: PR review bodies (APPROVED, COMMENTED, CHANGES_REQUESTED)
-            if [ "$FOUND_MENTION" = "false" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
-              echo "  🔍 Checking PR review bodies..."
-              
+            if [ -z "$MENTION_AUTHOR" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
               REVIEWS_URL="${SUBJECT_URL}/reviews"
               REVIEWS=$(curl -s -H "Authorization: Bearer $TOKEN" \
                 -H "Accept: application/vnd.github+json" \
@@ -227,7 +177,7 @@ jobs:
               ')
               
               if [ -n "$MENTION_REVIEW" ]; then
-                REVIEW_AUTHOR=$(echo "$REVIEWS" | jq -r '
+                MENTION_AUTHOR=$(echo "$REVIEWS" | jq -r '
                   [.[] | select(.body != null and .body != "" and 
                     (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
                 ')
@@ -235,31 +185,13 @@ jobs:
                   [.[] | select(.body != null and .body != "" and 
                     (.body | test("@agent-of-mkmeral"; "i")))] | last | .state // ""
                 ')
-                
-                echo "  ✅ Found @agent-of-mkmeral mention in PR review ($REVIEW_STATE) by @$REVIEW_AUTHOR"
-                FOUND_MENTION="true"
-                
-                curl -s -X POST \
-                  -H "Authorization: Bearer $TOKEN" \
-                  -H "Accept: application/vnd.github+json" \
-                  "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                  -d "{
-                    \"ref\": \"main\",
-                    \"inputs\": {
-                      \"prompt\": \"I was mentioned by @$REVIEW_AUTHOR in a PR review ($REVIEW_STATE) on $REPO#$NUMBER. Please respond to this review. URL: https://github.com/$REPO/pull/$NUMBER\"
-                    }
-                  }"
-                
-                echo "  ✅ Workflow dispatched"
-              else
-                echo "  ⏭️ No @agent-of-mkmeral mention found in PR reviews"
+                MENTION_SOURCE="review ($REVIEW_STATE)"
+                echo "  🔍 Found mention in PR review by @$MENTION_AUTHOR"
               fi
             fi
             
             # Check 4: PR review line comments (code-level comments)
-            if [ "$FOUND_MENTION" = "false" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
-              echo "  🔍 Checking PR review line comments..."
-              
+            if [ -z "$MENTION_AUTHOR" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
               REVIEW_COMMENTS_URL="${SUBJECT_URL}/comments"
               REVIEW_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
                 -H "Accept: application/vnd.github+json" \
@@ -271,7 +203,7 @@ jobs:
               ')
               
               if [ -n "$MENTION_LINE_COMMENT" ]; then
-                LINE_COMMENT_AUTHOR=$(echo "$REVIEW_COMMENTS" | jq -r '
+                MENTION_AUTHOR=$(echo "$REVIEW_COMMENTS" | jq -r '
                   [.[] | select(.body != null and 
                     (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
                 ')
@@ -279,32 +211,54 @@ jobs:
                   [.[] | select(.body != null and 
                     (.body | test("@agent-of-mkmeral"; "i")))] | last | .path // ""
                 ')
-                
-                echo "  ✅ Found @agent-of-mkmeral mention in PR line comment by @$LINE_COMMENT_AUTHOR on $LINE_COMMENT_PATH"
-                FOUND_MENTION="true"
-                
-                curl -s -X POST \
-                  -H "Authorization: Bearer $TOKEN" \
-                  -H "Accept: application/vnd.github+json" \
-                  "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                  -d "{
-                    \"ref\": \"main\",
-                    \"inputs\": {
-                      \"prompt\": \"I was mentioned by @$LINE_COMMENT_AUTHOR in a code review comment on $LINE_COMMENT_PATH in $REPO#$NUMBER. Please respond to this code review. URL: https://github.com/$REPO/pull/$NUMBER\"
-                    }
-                  }"
-                
-                echo "  ✅ Workflow dispatched"
-              else
-                echo "  ⏭️ No @agent-of-mkmeral mention found in PR line comments"
+                MENTION_SOURCE="line comment on $LINE_COMMENT_PATH"
+                echo "  🔍 Found mention in PR line comment by @$MENTION_AUTHOR"
               fi
             fi
             
-            if [ "$FOUND_MENTION" = "false" ]; then
-              echo "  ℹ️ No @agent-of-mkmeral mention found anywhere in $REPO#$NUMBER"
+            # ============================================================
+            # Decision: Did we find a mention? Is the author authorized?
+            # ============================================================
+            
+            if [ -z "$MENTION_AUTHOR" ]; then
+              # No mention text found
+              if [ "$REASON" = "mention" ] || [ "$REASON" = "team_mention" ]; then
+                echo "  ⚠️ GitHub says reason='$REASON' but couldn't identify mentioning user — skipping for security"
+              else
+                echo "  ℹ️ No @agent-of-mkmeral mention found anywhere in $REPO#$NUMBER"
+              fi
+            elif is_authorized "$MENTION_AUTHOR"; then
+              # ✅ Authorized — dispatch the agent
+              echo "  ✅ @$MENTION_AUTHOR is AUTHORIZED — dispatching agent"
+              
+              # Build dispatch prompt based on source
+              DISPATCH_PROMPT="I was mentioned by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER. Please check and respond appropriately."
+              if [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+                DISPATCH_URL="https://github.com/$REPO/pull/$NUMBER"
+              else
+                DISPATCH_URL="https://github.com/$REPO/issues/$NUMBER"
+              fi
+              DISPATCH_PROMPT="$DISPATCH_PROMPT URL: $DISPATCH_URL"
+              
+              curl -s -X POST \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                -d "{
+                  \"ref\": \"main\",
+                  \"inputs\": {
+                    \"prompt\": \"$DISPATCH_PROMPT\"
+                  }
+                }"
+              
+              echo "  ✅ Workflow dispatched for authorized user @$MENTION_AUTHOR"
+            else
+              # 🚫 Not authorized — skip
+              echo "  🚫 @$MENTION_AUTHOR is NOT authorized — skipping dispatch"
+              echo "  ℹ️ Only authorized users can trigger the agent via mentions"
             fi
             
-            # Mark notification as read
+            # Mark notification as read (always, regardless of auth)
             echo "  📖 Marking notification as read..."
             curl -s -X PATCH \
               -H "Authorization: Bearer $TOKEN" \
