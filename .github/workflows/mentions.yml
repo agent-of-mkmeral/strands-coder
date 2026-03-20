@@ -75,7 +75,7 @@ jobs:
             
             echo ""
             echo "📋 Mentions found:"
-            echo "$MENTIONS" | jq -r '.[] | "  - [\(.repository)] \(.subject_type): \(.subject_title)"'
+            echo "$MENTIONS" | jq -r '.[] | "  - [\(.repository)] \(.subject_type): \(.subject_title) (reason: \(.reason))"'
           else
             echo "has_mentions=false" >> $GITHUB_OUTPUT
             echo "✅ No new mentions to process"
@@ -99,9 +99,50 @@ jobs:
             SUBJECT_URL=$(echo "$mention" | jq -r '.subject_url')
             NOTIFICATION_ID=$(echo "$mention" | jq -r '.id')
             TITLE=$(echo "$mention" | jq -r '.subject_title')
+            REASON=$(echo "$mention" | jq -r '.reason')
             
             echo ""
-            echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE"
+            echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE (reason: $REASON)"
+            
+            # ============================================================
+            # FAST PATH: If GitHub says reason is "mention", trust it!
+            # GitHub's notification API already verified the mention.
+            # ============================================================
+            if [ "$REASON" = "mention" ] || [ "$REASON" = "team_mention" ]; then
+              echo "  ✅ GitHub notification reason is '$REASON' — dispatching directly"
+              
+              # Get issue/PR number from the API
+              CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$SUBJECT_URL")
+              NUMBER=$(echo "$CONTENT" | jq -r '.number')
+              
+              curl -s -X POST \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                -d "{
+                  \"ref\": \"main\",
+                  \"inputs\": {
+                    \"prompt\": \"I was mentioned (reason: $REASON) in $REPO#$NUMBER. Please check the issue/PR and respond appropriately. URL: https://github.com/$REPO/issues/$NUMBER\"
+                  }
+                }"
+              
+              echo "  ✅ Workflow dispatched (fast path)"
+              
+              # Mark notification as read
+              echo "  📖 Marking notification as read..."
+              curl -s -X PATCH \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
+              
+              continue
+            fi
+            
+            # ============================================================
+            # SLOW PATH: For other reasons, search for @agent-of-mkmeral
+            # ============================================================
             
             # Get the actual issue/PR content
             CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -110,10 +151,12 @@ jobs:
             
             BODY=$(echo "$CONTENT" | jq -r '.body // ""')
             NUMBER=$(echo "$CONTENT" | jq -r '.number')
+            FOUND_MENTION="false"
             
-            # Check if body contains @agent-of-mkmeral
+            # Check 1: Issue/PR body
             if echo "$BODY" | grep -qi "@agent-of-mkmeral"; then
               echo "  ✅ Found @agent-of-mkmeral mention in body"
+              FOUND_MENTION="true"
               
               curl -s -X POST \
                 -H "Authorization: Bearer $TOKEN" \
@@ -127,25 +170,29 @@ jobs:
                 }"
               
               echo "  ✅ Workflow dispatched"
-            else
-              echo "  ⏭️ No direct mention found, checking comments..."
+            fi
+            
+            # Check 2: Issue/PR comments
+            if [ "$FOUND_MENTION" = "false" ]; then
+              echo "  ⏭️ No direct mention in body, checking comments..."
               
               COMMENTS_URL=$(echo "$CONTENT" | jq -r '.comments_url // ""')
               if [ -n "$COMMENTS_URL" ] && [ "$COMMENTS_URL" != "null" ]; then
                 LATEST_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
                   -H "Accept: application/vnd.github+json" \
-                  "${COMMENTS_URL}?per_page=10&sort=created&direction=desc")
+                  "${COMMENTS_URL}?per_page=20&sort=created&direction=desc")
                 
                 MENTION_COMMENT=$(echo "$LATEST_COMMENTS" | jq -r '
-                  [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | first // empty
+                  [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last // empty
                 ')
                 
                 if [ -n "$MENTION_COMMENT" ]; then
                   COMMENT_AUTHOR=$(echo "$LATEST_COMMENTS" | jq -r '
-                    [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | first | .user.login // ""
+                    [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last | .user.login // ""
                   ')
                   
                   echo "  ✅ Found @agent-of-mkmeral mention in comment by @$COMMENT_AUTHOR"
+                  FOUND_MENTION="true"
                   
                   curl -s -X POST \
                     -H "Authorization: Bearer $TOKEN" \
@@ -163,6 +210,98 @@ jobs:
                   echo "  ⏭️ No @agent-of-mkmeral mention found in comments"
                 fi
               fi
+            fi
+            
+            # Check 3: PR review bodies (APPROVED, COMMENTED, CHANGES_REQUESTED)
+            if [ "$FOUND_MENTION" = "false" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+              echo "  🔍 Checking PR review bodies..."
+              
+              REVIEWS_URL="${SUBJECT_URL}/reviews"
+              REVIEWS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "${REVIEWS_URL}?per_page=20")
+              
+              MENTION_REVIEW=$(echo "$REVIEWS" | jq -r '
+                [.[] | select(.body != null and .body != "" and 
+                  (.body | test("@agent-of-mkmeral"; "i")))] | last // empty
+              ')
+              
+              if [ -n "$MENTION_REVIEW" ]; then
+                REVIEW_AUTHOR=$(echo "$REVIEWS" | jq -r '
+                  [.[] | select(.body != null and .body != "" and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
+                ')
+                REVIEW_STATE=$(echo "$REVIEWS" | jq -r '
+                  [.[] | select(.body != null and .body != "" and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .state // ""
+                ')
+                
+                echo "  ✅ Found @agent-of-mkmeral mention in PR review ($REVIEW_STATE) by @$REVIEW_AUTHOR"
+                FOUND_MENTION="true"
+                
+                curl -s -X POST \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                  -d "{
+                    \"ref\": \"main\",
+                    \"inputs\": {
+                      \"prompt\": \"I was mentioned by @$REVIEW_AUTHOR in a PR review ($REVIEW_STATE) on $REPO#$NUMBER. Please respond to this review. URL: https://github.com/$REPO/pull/$NUMBER\"
+                    }
+                  }"
+                
+                echo "  ✅ Workflow dispatched"
+              else
+                echo "  ⏭️ No @agent-of-mkmeral mention found in PR reviews"
+              fi
+            fi
+            
+            # Check 4: PR review line comments (code-level comments)
+            if [ "$FOUND_MENTION" = "false" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+              echo "  🔍 Checking PR review line comments..."
+              
+              REVIEW_COMMENTS_URL="${SUBJECT_URL}/comments"
+              REVIEW_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "${REVIEW_COMMENTS_URL}?per_page=20&sort=created&direction=desc")
+              
+              MENTION_LINE_COMMENT=$(echo "$REVIEW_COMMENTS" | jq -r '
+                [.[] | select(.body != null and 
+                  (.body | test("@agent-of-mkmeral"; "i")))] | last // empty
+              ')
+              
+              if [ -n "$MENTION_LINE_COMMENT" ]; then
+                LINE_COMMENT_AUTHOR=$(echo "$REVIEW_COMMENTS" | jq -r '
+                  [.[] | select(.body != null and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
+                ')
+                LINE_COMMENT_PATH=$(echo "$REVIEW_COMMENTS" | jq -r '
+                  [.[] | select(.body != null and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .path // ""
+                ')
+                
+                echo "  ✅ Found @agent-of-mkmeral mention in PR line comment by @$LINE_COMMENT_AUTHOR on $LINE_COMMENT_PATH"
+                FOUND_MENTION="true"
+                
+                curl -s -X POST \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                  -d "{
+                    \"ref\": \"main\",
+                    \"inputs\": {
+                      \"prompt\": \"I was mentioned by @$LINE_COMMENT_AUTHOR in a code review comment on $LINE_COMMENT_PATH in $REPO#$NUMBER. Please respond to this code review. URL: https://github.com/$REPO/pull/$NUMBER\"
+                    }
+                  }"
+                
+                echo "  ✅ Workflow dispatched"
+              else
+                echo "  ⏭️ No @agent-of-mkmeral mention found in PR line comments"
+              fi
+            fi
+            
+            if [ "$FOUND_MENTION" = "false" ]; then
+              echo "  ℹ️ No @agent-of-mkmeral mention found anywhere in $REPO#$NUMBER"
             fi
             
             # Mark notification as read
