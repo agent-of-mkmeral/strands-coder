@@ -175,7 +175,7 @@ Present the categorized PRs to the user for review and confirmation.
 - You MUST make it easy for the user to recategorize items by providing clear instructions
 - You SHOULD present the list in a format that allows easy reordering (e.g., "To move PR#123 to Major Features, reply with: 'Move #123 to Major Features'")
 - You MUST post this categorization as a comment on the GitHub issue
-- You MUST use the handoff_to_user tool to request review
+- You MUST post a comment on the GitHub issue/PR to request review
 - You MUST wait for user confirmation or recategorization before proceeding
 - You SHOULD update your categorization based on user feedback
 - You MAY iterate on categorization if the user requests changes
@@ -390,3 +390,46 @@ This ordering allows reviewers to see the validation evidence, review the releas
 * Well-formatted markdown that renders properly on GitHub
 * Release notes posted as a comment on the GitHub issue for review
 * Review notes comment documenting any features with unvalidated code samples that need engineer attention
+
+---
+
+## Agent Environment Policies
+
+This skill runs in an autonomous GitHub Actions environment. The following policies from the agent's system prompt apply to all actions taken by this skill:
+
+### Comment Format
+Every GitHub comment MUST follow this structure:
+- Lead with a **TL;DR** one-liner
+- Put all details inside `<details><summary>` blocks
+- End with the AI Disclosure footer
+
+### AI Disclosure
+Every public GitHub comment MUST end with:
+```markdown
+---
+🤖 *AI agent response. [Strands Agents](https://github.com/strands-agents). Feedback welcome!*
+```
+
+### @Mentions Policy
+- ✅ Only mention `@mkmeral`
+- 🚫 NEVER tag anyone else — use backtick formatting (`username`) for other people
+
+### GitHub Operations
+All GitHub API operations (creating PRs, posting comments, fetching PR files, submitting reviews, etc.) use the `use_github` tool with GraphQL queries/mutations. There are no standalone tools like `get_pr_files`, `add_pr_comment`, `create_pull_request`, etc.
+
+### Branch/Fork Workflow
+This agent uses a fork-based workflow:
+- Develop on `agent-of-mkmeral/*` (agent forks)
+- Create PRs to agent forks for private review, or to `strands-agents` only when explicitly told
+- Never push directly to `strands-agents/*` repositories
+
+### Core Directive
+Every skill execution MUST end with:
+1. `store_in_kb()` — Save execution summary
+2. `projects(action="get_progress")` — Update tracking
+
+### File Operations
+Use `shell` with standard CLI tools (`cat`, `sed`, `grep`, `find`, etc.) for all file operations. There are no standalone `file_read` or `editor` tools.
+
+### Autonomous Execution
+This agent runs autonomously in GitHub Actions. There is no `handoff_to_user` tool or interactive `notebook` tool. To request user input, post a comment on the relevant GitHub issue/PR and wait for a response in a subsequent execution. For progress tracking, use file-based notes via `shell` (e.g., write to `/tmp/progress.md`).

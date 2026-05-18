@@ -14,6 +14,9 @@ Key Features:
    • Rate limit awareness and error handling
 
 2. Safety Features:
+   • **Throttle enforcement** — external mutations blocked after daily limit
+   • **Node ID resolution** — opaque node IDs are resolved to verify target repos
+   • **Strict mutation mode** — mutations blocked when target owner can't be verified
    • Confirmation prompts for mutative operations (mutations)
    • Parameter validation with helpful error messages
    • Error handling with detailed feedback
@@ -64,7 +67,11 @@ from rich.console import Console
 from rich.panel import Panel
 from strands import tool
 
-from strands_coder.tools.github_guardrails import validate_graphql_owner
+from strands_coder.activity import enforce_throttle
+from strands_coder.tools.github_guardrails import (
+    extract_owner_from_graphql_variables,
+    validate_graphql_owner,
+)
 
 # Initialize colorama
 init(autoreset=True)
@@ -251,10 +258,11 @@ def use_github(
     How It Works:
     ------------
     1. The tool validates the GitHub token from environment variables
-    2. For mutations or potentially destructive operations, it prompts for confirmation
-    3. It executes the GraphQL query/mutation against GitHub's API
-    4. Responses are processed and formatted with proper error handling
-    5. Rate limit information is displayed when available
+    2. For mutations, it enforces the daily activity throttle (external repos only)
+    3. For mutations or potentially destructive operations, it prompts for confirmation
+    4. It executes the GraphQL query/mutation against GitHub's API
+    5. Responses are processed and formatted with proper error handling
+    6. Rate limit information is displayed when available
 
     Common Usage Scenarios:
     ---------------------
@@ -316,6 +324,8 @@ def use_github(
         - Requires GITHUB_TOKEN environment variable to be set
         - Mutations require user confirmation in non-dev environments
         - You can disable confirmation by setting BYPASS_TOOL_CONSENT=true
+        - External mutations are throttled (max 50/day by default)
+        - Throttling can be disabled via STRANDS_THROTTLE_ENABLED=false
         - The tool automatically handles rate limiting information
         - GraphQL errors are formatted and displayed clearly
         - All responses are JSON formatted for easy parsing
@@ -324,6 +334,8 @@ def use_github(
         - GITHUB_TOKEN: GitHub token used by default (prevents workflow loops)
         - PAT_TOKEN: Personal Access Token used when use_pat_token=True
         - BYPASS_TOOL_CONSENT: Set to "true" to skip confirmation prompts
+        - STRANDS_THROTTLE_ENABLED: Set to "false" to disable throttling
+        - STRANDS_THROTTLE_LIMIT: Max external actions per 24h (default: 50)
 
     Token Selection:
         - use_pat_token=False (default): Uses GITHUB_TOKEN - safe for workflows ✅
@@ -338,8 +350,20 @@ def use_github(
     if variables is None:
         variables = {}
 
+    # Check if the operation is potentially mutative (needed for guardrail layers)
+    is_mutative = query_type.lower() == "mutation" or is_mutation_query(query)
+
+    # Get GitHub token early — needed for node ID resolution in guardrails
+    github_token = get_github_token(use_pat_token)
+
     # Validate target owner is in allowed list
-    owner_error = validate_graphql_owner(variables)
+    # For mutations: also resolves node IDs and enforces strict mode (Fixes #57)
+    # Returns (error_msg, resolved_owner) — resolved_owner is used for throttle check
+    owner_error, resolved_owner = validate_graphql_owner(
+        variables,
+        is_mutative=is_mutative,
+        token=github_token,
+    )
     if owner_error:
         return {
             "status": "error",
@@ -364,8 +388,6 @@ def use_github(
         f"Invoking GitHub GraphQL: query_type = {query_type}, variables = {variables}"
     )
 
-    # Get GitHub token
-    github_token = get_github_token(use_pat_token)
     if not github_token:
         return {
             "status": "error",
@@ -377,8 +399,49 @@ def use_github(
             ],
         }
 
-    # Check if the operation is potentially mutative
-    is_mutative = query_type.lower() == "mutation" or is_mutation_query(query)
+    # --- Throttle enforcement (before consent, before execution) ---
+    if is_mutative:
+        # Use resolved_owner from guardrails (which resolves node IDs too),
+        # falling back to explicit variable extraction
+        target_owner = resolved_owner or extract_owner_from_graphql_variables(variables)
+        allowed, throttle_msg = enforce_throttle(target_owner)
+        if not allowed:
+            throttle_limit = os.environ.get("STRANDS_THROTTLE_LIMIT", "30")
+            console.print(
+                Panel(
+                    f"🛑 SAFETY GUARDRAIL — Daily throttle limit reached\n\n{throttle_msg}",
+                    title="Throttle Limit Reached",
+                    border_style="red",
+                )
+            )
+            return {
+                "status": "error",
+                "content": [
+                    {
+                        "text": (
+                            f"🛑 SAFETY GUARDRAIL — Daily external activity throttle limit reached.\n"
+                            f"\n"
+                            f"This is a safety feature to prevent the agent from making excessive "
+                            f"changes to repositories it does not own. It is NOT a bug or a permissions "
+                            f"issue — do NOT attempt to work around it.\n"
+                            f"\n"
+                            f"Details:\n"
+                            f"  • Target: {target_owner or '(unknown)'}\n"
+                            f"  • Daily limit: {throttle_limit} external actions per 24 hours\n"
+                            f"  • Status: {throttle_msg}\n"
+                            f"  • Internal actions (agent's own repos): always allowed, not affected\n"
+                            f"\n"
+                            f"What to do:\n"
+                            f"  1. Inform the user that the daily throttle limit for external repos has been reached.\n"
+                            f"  2. Explain that this is a safety guardrail (not an error) and the limit resets in 24 hours.\n"
+                            f"  3. If this limit is blocking important work, create an issue in the agent's own repo "
+                            f"(agent-of-mkmeral/strands-coder-private) titled 'Throttle limit reached — needs attention' "
+                            f"and tag @mkmeral in the issue body.\n"
+                            f"  4. Do NOT retry the mutation or try alternative approaches to bypass this limit."
+                        )
+                    }
+                ],
+            }
 
     if is_mutative and not STRANDS_BYPASS_TOOL_CONSENT:
         # Prompt for confirmation before executing the operation

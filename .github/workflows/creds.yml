@@ -1,0 +1,157 @@
+name: Credential Vending
+
+# Vends scoped-down, short-lived AWS credentials for the dashboard.
+# Flow:
+#   Dashboard generates RSA-OAEP key pair → triggers this workflow with public key
+#   → OIDC → base creds → sts:AssumeRole (scoped-down, 15-min TTL)
+#   → encrypt creds with browser's public key → upload artifact
+#   → Dashboard downloads, unzips with fflate, decrypts with private key
+#
+# Security:
+#   - End-to-end encryption: only the requesting browser can decrypt
+#   - RSA-OAEP + AES-256-GCM hybrid encryption
+#   - Inline session policy: CloudWatch Logs read-only
+#   - 15-minute TTL — expires regardless
+#   - Cannot call Bedrock, S3, STS, IAM, or anything else
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        description: 'RSA-OAEP public key (base64 SPKI) for encrypting credentials'
+        required: false
+        type: string
+        default: ''
+      log_group:
+        description: 'CloudWatch log group (for policy scoping)'
+        required: false
+        type: string
+        default: '/aws/bedrock-agentcore/runtimes/strands-coder'
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  vend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+          mask-aws-account-id: true
+
+      - name: Get role ARN
+        id: role
+        run: |
+          ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text | sed 's|assumed-role/\(.*\)/.*|role/\1|; s|sts|iam|')
+          echo "arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+          echo "region=${AWS_REGION:-us-west-2}" >> "$GITHUB_OUTPUT"
+
+      - name: Assume scoped-down role
+        env:
+          ROLE_ARN: ${{ steps.role.outputs.arn }}
+          LOG_GROUP: ${{ inputs.log_group }}
+        run: |
+          LOG_GROUP_ARN="arn:aws:logs:*:*:log-group:${LOG_GROUP}:*"
+
+          RESULT=$(aws sts assume-role \
+            --role-arn "$ROLE_ARN" \
+            --role-session-name "dashboard-traces-$(date +%s)" \
+            --duration-seconds 900 \
+            --policy "{
+              \"Version\": \"2012-10-17\",
+              \"Statement\": [{
+                \"Effect\": \"Allow\",
+                \"Action\": [
+                  \"logs:StartQuery\",
+                  \"logs:GetQueryResults\",
+                  \"logs:StopQuery\",
+                  \"logs:DescribeLogGroups\"
+                ],
+                \"Resource\": \"${LOG_GROUP_ARN}\"
+              }]
+            }" \
+            --output json)
+
+          ACCESS_KEY=$(echo "$RESULT" | jq -r '.Credentials.AccessKeyId')
+          SECRET_KEY=$(echo "$RESULT" | jq -r '.Credentials.SecretAccessKey')
+          SESSION_TOKEN=$(echo "$RESULT" | jq -r '.Credentials.SessionToken')
+          EXPIRATION=$(echo "$RESULT" | jq -r '.Credentials.Expiration')
+
+          jq -n \
+            --arg ak "$ACCESS_KEY" \
+            --arg sk "$SECRET_KEY" \
+            --arg st "$SESSION_TOKEN" \
+            --arg exp "$EXPIRATION" \
+            --arg region "${AWS_REGION:-us-west-2}" \
+            --arg lg "${LOG_GROUP}" \
+            --arg va "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              accessKeyId: $ak,
+              secretAccessKey: $sk,
+              sessionToken: $st,
+              expiration: $exp,
+              region: $region,
+              logGroup: $lg,
+              vendedAt: $va,
+              ttlSeconds: 900
+            }' > creds.json
+
+          echo "✅ Scoped credentials vended (expires: $EXPIRATION)"
+
+      - name: Encrypt credentials with browser public key
+        if: ${{ inputs.public_key != '' }}
+        env:
+          PUBLIC_KEY_B64: ${{ inputs.public_key }}
+        run: |
+          node << 'ENCRYPT_EOF'
+          const crypto = require('crypto');
+          const fs = require('fs');
+
+          const pubKeyDer = Buffer.from(process.env.PUBLIC_KEY_B64, 'base64');
+          const credsJson = fs.readFileSync('creds.json', 'utf8');
+
+          // Generate random AES-256-GCM key and IV
+          const aesKey = crypto.randomBytes(32);
+          const iv = crypto.randomBytes(12);
+
+          // Encrypt credentials with AES-256-GCM
+          const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+          let encrypted = cipher.update(credsJson, 'utf8');
+          encrypted = Buffer.concat([encrypted, cipher.final()]);
+          const tag = cipher.getAuthTag();
+
+          // Encrypt AES key with browser's RSA-OAEP public key
+          const encryptedKey = crypto.publicEncrypt({
+            key: pubKeyDer,
+            format: 'der',
+            type: 'spki',
+            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: 'sha256'
+          }, aesKey);
+
+          // Write encrypted payload — no sensitive data in plaintext
+          const payload = JSON.stringify({
+            ek: encryptedKey.toString('base64'),
+            iv: iv.toString('base64'),
+            d: encrypted.toString('base64'),
+            tag: tag.toString('base64'),
+            ts: new Date().toISOString()
+          });
+
+          fs.writeFileSync('creds.json', payload);
+          console.log(`✅ Credentials encrypted (${payload.length} bytes)`);
+          console.log('   Algorithm: RSA-OAEP + AES-256-GCM');
+          console.log('   Only the requesting browser can decrypt');
+          ENCRYPT_EOF
+
+      - name: Upload credentials artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-creds
+          path: creds.json
+          retention-days: 1

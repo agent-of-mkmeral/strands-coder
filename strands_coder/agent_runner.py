@@ -264,6 +264,75 @@ def extract_issue_id() -> str | None:
     return None
 
 
+def generate_stable_session_id() -> str:
+    """
+    Generate a stable, deterministic session ID from the GitHub event context.
+
+    Session IDs are keyed on org/repo + issue/PR/discussion number so that
+    conversations persist across multiple workflow runs for the same entity.
+
+    Format:
+      - Issues/issue comments:  gh-{org}-{repo}-issue-{number}
+      - PRs/PR reviews/comments: gh-{org}-{repo}-pr-{number}
+      - Discussions/comments:    gh-{org}-{repo}-disc-{number}
+      - Other (workflow_dispatch, label, schedule, etc.):
+                                 gh-{org}-{repo}-{run_id}  (ephemeral)
+
+    The SESSION_ID env var can still override everything for manual control.
+    """
+    # Explicit override always wins
+    explicit = os.getenv("SESSION_ID")
+    if explicit:
+        return explicit
+
+    repo = os.getenv("GITHUB_REPOSITORY", "unknown/unknown")
+    repo_slug = repo.replace("/", "-")
+
+    github_context_json = os.environ.get("GITHUB_CONTEXT", "{}")
+    if not github_context_json or github_context_json == "{}":
+        # No context available — fall back to per-run ID
+        run_id = os.getenv("GITHUB_RUN_ID", "local")
+        return f"gh-{repo_slug}-{run_id}"
+
+    try:
+        github_context = json.loads(github_context_json)
+    except json.JSONDecodeError:
+        run_id = os.getenv("GITHUB_RUN_ID", "local")
+        return f"gh-{repo_slug}-{run_id}"
+
+    event_name = github_context.get("event_name", "")
+    event = github_context.get("event", {})
+
+    # Issue events (issues, issue_comment)
+    if event_name in ["issues", "issue_comment"]:
+        issue = event.get("issue", {})
+        number = issue.get("number")
+        if number is not None:
+            return f"gh-{repo_slug}-issue-{number}"
+
+    # Pull request events (pull_request, pull_request_review, pull_request_review_comment)
+    elif event_name in [
+        "pull_request",
+        "pull_request_review",
+        "pull_request_review_comment",
+    ]:
+        pr = event.get("pull_request", {})
+        number = pr.get("number")
+        if number is not None:
+            return f"gh-{repo_slug}-pr-{number}"
+
+    # Discussion events (discussion, discussion_comment)
+    elif event_name in ["discussion", "discussion_comment"]:
+        discussion = event.get("discussion", {})
+        number = discussion.get("number")
+        if number is not None:
+            return f"gh-{repo_slug}-disc-{number}"
+
+    # Fallback: per-run (workflow_dispatch, schedule, label, push, etc.)
+    run_id = os.getenv("GITHUB_RUN_ID", "local")
+    return f"gh-{repo_slug}-{run_id}"
+
+
 def run_agent(prompt: str) -> None:
     """Run the agent with the provided prompt."""
     has_mcp_servers = False
@@ -292,12 +361,27 @@ def run_agent(prompt: str) -> None:
             if skills_plugin:
                 plugins.append(skills_plugin)
 
-        # Model and session
+        # Actor-Critic verification loop
+        if os.getenv("ACTOR_CRITIC_ENABLED", "false").lower() == "true":
+            from strands_coder.plugins.actor_critic import ActorCriticConfig, ActorCriticPlugin
+
+            actor_critic_plugin = ActorCriticPlugin(
+                ActorCriticConfig(
+                    max_retries=int(os.getenv("ACTOR_CRITIC_MAX_RETRIES") or "2"),
+                    time_budget_seconds=float(
+                        os.getenv("ACTOR_CRITIC_TIME_BUDGET") or "120"
+                    ),
+                )
+            )
+            plugins.append(actor_critic_plugin)
+            print(
+                f"✓ Actor-Critic plugin: max_retries={actor_critic_plugin.config.max_retries}, "
+                f"time_budget={actor_critic_plugin.config.time_budget_seconds}s"
+            )
+
+        # Model and session — use stable session IDs for cross-run persistence
         model = create_model(provider=os.getenv("STRANDS_PROVIDER", "bedrock"))
-        session_id = (
-            os.getenv("SESSION_ID")
-            or f"gh-{os.getenv('GITHUB_REPOSITORY', 'unknown').replace('/', '-')}-{os.getenv('GITHUB_RUN_ID', 'local')}"
-        )
+        session_id = generate_stable_session_id()
 
         session_manager = None
         s3_bucket = os.getenv("S3_SESSION_BUCKET")
@@ -308,6 +392,20 @@ def run_agent(prompt: str) -> None:
                 prefix=os.getenv("S3_SESSION_PREFIX", ""),
             )
             print(f"S3 session: {session_id}")
+
+        # Propagate session ID via OTEL baggage for AgentCore observability
+        # Ref: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+        if os.environ.get("AGENT_OBSERVABILITY_ENABLED") == "true":
+            try:
+                from opentelemetry import baggage, context
+
+                ctx = baggage.set_baggage("session.id", session_id)
+                context.attach(ctx)
+                print(f"✓ OTEL baggage: session.id={session_id}")
+            except ImportError:
+                print("⚠ opentelemetry not installed, skipping baggage propagation")
+            except Exception as e:
+                print(f"⚠ OTEL baggage setup failed: {e}")
 
         # Extract issue_id for trace linking (CRUCIAL for observability)
         issue_id = extract_issue_id()
@@ -368,6 +466,13 @@ def run_agent(prompt: str) -> None:
 
         result = agent(enhanced_prompt)
 
+        # Print prompt/result markers for dashboard log parsing
+        # The dashboard extracts these from the raw job logs to show Request/Response
+        prompt_log = enhanced_prompt[:10000]
+        result_log = str(result)[:10000]
+        print(f"\n**Prompt:**\n```\n{prompt_log}\n```\n")
+        print(f"\n**Result:**\n```\n{result_log}\n```\n")
+
         # Write to GitHub Actions summary
         summary_file = os.getenv("GITHUB_STEP_SUMMARY")
         if summary_file:
@@ -388,6 +493,15 @@ def run_agent(prompt: str) -> None:
                     )
             except Exception as e:
                 print(f"Failed to write summary: {e}")
+
+        # Print summary markers to stdout for dashboard log parsing
+        # The dashboard parses raw job logs (stdout) for these patterns.
+        # GITHUB_STEP_SUMMARY content is NOT in raw logs - it's a separate file.
+        print(f"\n**Prompt:**\n```\n{enhanced_prompt}\n```\n")
+        print(f"**Result:**\n```\n{str(result)}\n```\n")
+        print(f"**Session:** `{session_id}`")
+        if kb_id:
+            print(f"**Knowledge Base:** `{kb_id}`")
 
         # Knowledge base storage (after)
         if kb_id and "store_in_kb" in agent.tool_names:

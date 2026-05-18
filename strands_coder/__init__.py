@@ -7,7 +7,7 @@ enabling intelligent repository automation through AI agents.
 __version__ = "0.1.0"
 
 from .agent_runner import run_agent
-from .activity import get_agent_activity, check_throttle, get_activity_summary
+from .activity import get_agent_activity, check_throttle, check_throttle_cached, enforce_throttle, is_external_repo, invalidate_throttle_cache, get_activity_summary
 from .tools.create_subagent import create_subagent
 from .tools.projects import projects
 from .tools.scheduler import scheduler
@@ -35,6 +35,10 @@ __all__ = [
     # Activity tracking
     "get_agent_activity",
     "check_throttle",
+    "check_throttle_cached",
+    "enforce_throttle",
+    "is_external_repo",
+    "invalidate_throttle_cache",
     "get_activity_summary",
     # Tools
     "projects",

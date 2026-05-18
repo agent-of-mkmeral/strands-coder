@@ -69,6 +69,7 @@ from rich.table import Table
 from strands import tool
 from strands_tools.utils import console_util
 
+from strands_coder.activity import enforce_throttle
 from strands_coder.tools.github_guardrails import validate_repo_owner
 
 console = console_util.create()
@@ -127,6 +128,33 @@ def _github_request(
     owner_error = validate_repo_owner(repo)
     if owner_error:
         return owner_error
+
+    # Throttle enforcement for write operations (POST, PATCH, PUT, DELETE)
+    if method.upper() != "GET":
+        allowed, throttle_msg = enforce_throttle(repo)
+        if not allowed:
+            throttle_limit = os.environ.get("STRANDS_THROTTLE_LIMIT", "30")
+            return (
+                f"Error: 🛑 SAFETY GUARDRAIL — Daily external activity throttle limit reached.\n"
+                f"\n"
+                f"This is a safety feature to prevent the agent from making excessive "
+                f"changes to repositories it does not own. It is NOT a bug or a permissions "
+                f"issue — do NOT attempt to work around it.\n"
+                f"\n"
+                f"Details:\n"
+                f"  • Target repo: {repo}\n"
+                f"  • Daily limit: {throttle_limit} external actions per 24 hours\n"
+                f"  • Status: {throttle_msg}\n"
+                f"  • Internal actions (agent's own repos): always allowed, not affected\n"
+                f"\n"
+                f"What to do:\n"
+                f"  1. Inform the user that the daily throttle limit for external repos has been reached.\n"
+                f"  2. Explain that this is a safety guardrail (not an error) and the limit resets in 24 hours.\n"
+                f"  3. If this limit is blocking important work, create an issue in the agent's own repo "
+                f"(agent-of-mkmeral/strands-coder-private) titled 'Throttle limit reached — needs attention' "
+                f"and tag @mkmeral in the issue body.\n"
+                f"  4. Do NOT retry the mutation or try alternative approaches to bypass this limit."
+            )
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:

@@ -1,10 +1,10 @@
 name: Mention Trigger
 
 on:
-  # Check for mentions every 15 minutes
+  # Check for mentions hourly during the day (8am-10pm UTC)
   schedule:
-    - cron: '*/15 * * * *'
-  
+    - cron: '0 8-22 * * *'
+
   # Allow manual trigger for testing
   workflow_dispatch:
     inputs:
@@ -19,6 +19,7 @@ permissions: write-all
 jobs:
   check-mentions:
     runs-on: ubuntu-latest
+    # Only runs on schedule and manual dispatch — agent.yml handles all local events directly
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,6 +35,7 @@ jobs:
           TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
           
           echo "🔍 Checking for @agent-of-mkmeral mentions..."
+          echo "   Trigger: ${{ github.event_name }}"
           
           # Fetch unread notifications (mentions show up as notifications)
           NOTIFICATIONS=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -49,8 +51,7 @@ jobs:
           MENTIONS=$(echo "$NOTIFICATIONS" | jq -r '
             [.[] | select(
               .reason == "mention" or 
-              .reason == "team_mention" or
-              (.subject.type == "Issue" or .subject.type == "PullRequest")
+              .reason == "team_mention"
             )] | 
             map({
               id: .id,
@@ -87,7 +88,7 @@ jobs:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MENTIONS: ${{ steps.check-mentions.outputs.mentions }}
-          AUTHORIZED_USERS: ${{ secrets.AUTHORIZED_USERS }}
+          AUTHORIZED_USERS: ${{ vars.AUTHORIZED_USERS }}
         run: |
           TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
           
@@ -120,6 +121,17 @@ jobs:
             
             echo ""
             echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE (reason: $REASON)"
+            
+            # Skip notifications from our own repo — agent.yml handles those via direct event triggers
+            if [ "$REPO" = "${{ github.repository }}" ]; then
+              echo "  ⏭️ Skipping own-repo notification (handled by agent.yml direct triggers)"
+              # Still mark as read to avoid reprocessing on next poll
+              curl -s -X PATCH \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
+              continue
+            fi
             
             # Get the actual issue/PR content
             CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
@@ -231,25 +243,84 @@ jobs:
               # ✅ Authorized — dispatch the agent
               echo "  ✅ @$MENTION_AUTHOR is AUTHORIZED — dispatching agent"
               
-              # Build dispatch prompt based on source
-              DISPATCH_PROMPT="I was mentioned by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER. Please check and respond appropriately."
+              # ============================================================
+              # Extract the actual comment/review content for the dispatch prompt.
+              # CRITICAL: without the actual content, the agent sees a generic
+              # "I was mentioned" prompt, matches it against session history,
+              # and dismisses it as a duplicate.
+              # ============================================================
+              MENTION_BODY=""
+              
+              if [ "$MENTION_SOURCE" = "comment" ]; then
+                MENTION_BODY=$(echo "$LATEST_COMMENTS" | jq -r \
+                  '[.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              elif [ "$MENTION_SOURCE" = "body" ]; then
+                MENTION_BODY="$BODY"
+              elif echo "$MENTION_SOURCE" | grep -q "^review"; then
+                MENTION_BODY=$(echo "$REVIEWS" | jq -r \
+                  '[.[] | select(.body != null and .body != "" and (.body | test("@agent-of-mkmeral"; "i")))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              elif echo "$MENTION_SOURCE" | grep -q "^line comment"; then
+                MENTION_BODY=$(echo "$REVIEW_COMMENTS" | jq -r \
+                  '[.[] | select(.body != null and (.body | test("@agent-of-mkmeral"; "i")))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              fi
+              
+              # Truncate to avoid workflow_dispatch input limits (65535 chars)
+              if [ ${#MENTION_BODY} -gt 2000 ]; then
+                MENTION_BODY="${MENTION_BODY:0:2000}... (truncated)"
+              fi
+              
+              echo "  📝 Comment body extracted (${#MENTION_BODY} chars)"
+              
+              # Build URL
               if [ "$SUBJECT_TYPE" = "PullRequest" ]; then
                 DISPATCH_URL="https://github.com/$REPO/pull/$NUMBER"
               else
                 DISPATCH_URL="https://github.com/$REPO/issues/$NUMBER"
               fi
-              DISPATCH_PROMPT="$DISPATCH_PROMPT URL: $DISPATCH_URL"
+              
+              # Build rich prompt with actual content + timestamp
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              PROMPT_FILE=$(mktemp)
+              if [ -n "$MENTION_BODY" ]; then
+                printf '%s\n' "NEW mention at $TIMESTAMP by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER." \
+                  "URL: $DISPATCH_URL" "" \
+                  "What @$MENTION_AUTHOR said:" "$MENTION_BODY" "" \
+                  "This is a NEW trigger with new content above. Do NOT dismiss as duplicate." \
+                  "Check the PR/issue for all recent comments and reviews, then respond appropriately." \
+                  > "$PROMPT_FILE"
+              else
+                printf '%s\n' "NEW mention at $TIMESTAMP by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER." \
+                  "URL: $DISPATCH_URL" "" \
+                  "This is a NEW trigger. Do NOT dismiss as duplicate." \
+                  "Check the PR/issue for the latest comments and reviews, then respond appropriately." \
+                  > "$PROMPT_FILE"
+              fi
+              
+              # session ID (same as before)
+              REPO_SLUG=$(echo "$REPO" | tr '/' '-')
+              if [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+                SESSION_ID="gh-${REPO_SLUG}-pr-${NUMBER}"
+              else
+                SESSION_ID="gh-${REPO_SLUG}-issue-${NUMBER}"
+              fi
+              echo "  📎 Session ID: $SESSION_ID"
+              
+              # Use jq for safe JSON encoding
+              PAYLOAD=$(jq -n \
+                --arg ref "main" \
+                --arg prompt "$(cat "$PROMPT_FILE")" \
+                --arg session_id "$SESSION_ID" \
+                '{ref: $ref, inputs: {prompt: $prompt, session_id: $session_id}}')
+              rm -f "$PROMPT_FILE"
               
               curl -s -X POST \
                 -H "Authorization: Bearer $TOKEN" \
                 -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
-                -d "{
-                  \"ref\": \"main\",
-                  \"inputs\": {
-                    \"prompt\": \"$DISPATCH_PROMPT\"
-                  }
-                }"
+                -d "$PAYLOAD"
               
               echo "  ✅ Workflow dispatched for authorized user @$MENTION_AUTHOR"
             else
@@ -275,5 +346,6 @@ jobs:
           echo "## Mention Check Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Has Mentions:** ${{ steps.check-mentions.outputs.has_mentions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Polling Interval:** Every 15 minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- **Schedule:** Hourly (8am-10pm UTC) + reactive on @mentions" >> $GITHUB_STEP_SUMMARY

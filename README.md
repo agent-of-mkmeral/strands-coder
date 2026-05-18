@@ -5,419 +5,386 @@
     </a>
   </div>
 
-  <h1>
-    Strands Coder
-  </h1>
+  <h1>Strands Coder</h1>
 
-  <h2>
-    Autonomous GitHub Agent for Strands Agents
-  </h2>
-
-  <div align="center">
-    <a href="https://github.com/marketplace/actions/strands-coder"><img alt="GitHub Marketplace" src="https://img.shields.io/badge/Marketplace-Strands%20Coder-blue?logo=github"/></a>
-    <a href="https://pypi.org/project/strands-coder/"><img alt="PyPI Version" src="https://img.shields.io/pypi/v/strands-coder"/></a>
-    <a href="https://github.com/agent-of-mkmeral/strands-coder"><img alt="GitHub stars" src="https://img.shields.io/github/stars/agent-of-mkmeral/strands-coder"/></a>
-    <a href="https://github.com/agent-of-mkmeral/strands-coder/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/agent-of-mkmeral/strands-coder"/></a>
-    <a href="https://aws.amazon.com/bedrock/"><img alt="Bedrock" src="https://img.shields.io/badge/AWS-Bedrock-FF9900?logo=amazon-aws"/></a>
-    <a href="https://cloud.langfuse.com"><img alt="Langfuse" src="https://img.shields.io/badge/Langfuse-Observability-4B32C3"/></a>
-  </div>
+  <p><b>Autonomous GitHub Agent for Strands Agents — Maintainer Operations</b></p>
   
   <p>
-    <a href="https://github.com/marketplace/actions/strands-coder">GitHub Marketplace</a>
-    ◆ <a href="https://strandsagents.com/">Strands Docs</a>
-    ◆ <a href="https://aws.amazon.com/bedrock/">AWS Bedrock</a>
-    ◆ <a href="https://cloud.langfuse.com">Langfuse</a>
-    ◆ <a href="https://github.com/strands-agents/sdk-python">Strands SDK</a>
-    ◆ <a href="https://dev.strands.my">Dashboard</a>
+    <a href="https://github.com/marketplace/actions/strands-coder">Marketplace</a>
+    · <a href="https://strandsagents.com/">Strands Docs</a>
+    · <a href="https://github.com/strands-agents/sdk-python">Strands SDK</a>
   </p>
+  
+  <h3>
+    📊 <a href="https://agent-of-mkmeral.github.io/strands-dashboard/">Dashboard</a>
+    &nbsp;·&nbsp;
+    🌍 <a href="https://agent-of-mkmeral.github.io/strands-dashboard/activity.html">Activity</a>
+  </h3>
 </div>
 
-An autonomous GitHub agent that codes, reviews, tracks, schedules, and evolves—all on its own. Built with [Strands Agents SDK](https://github.com/strands-agents/sdk-python), it doesn't just respond to events—it proactively identifies work, creates issues, reviews PRs, tracks progress in GitHub Projects, and learns from every interaction.
+---
+
+> **🔴 Want to disable the agent?** Go to **Settings → Actions → General → Disable Actions** on this repo. That turns off everything — no events, no mentions, no scheduled jobs. To re-enable, flip it back on.
 
 ---
 
-## 🚀 Get Started in 2 Minutes
+This is **Strands Coder** — an autonomous GitHub agent built on [Strands Agents SDK](https://github.com/strands-agents/sdk-python). The reference deployment (`@agent-of-mkmeral`) reviews PRs, triages issues, writes code, and manages project boards across `strands-agents/*` repositories. This repo contains the code, prompts, skills, and workflows so you can see how it works, fork it, or run your own.
 
-**Available on [GitHub Marketplace](https://github.com/marketplace/actions/strands-coder)**
+**All Strands Agents maintainers are authorized** — you can mention `@agent-of-mkmeral` in any `strands-agents/*` repo and it will respond.
 
-### 1. Add the workflow to your repo
+## 🚀 Quick Reference
 
-Create `.github/workflows/agent.yml`:
-
-```yaml
-name: AI Agent
-
-on:
-  issues:
-    types: [opened, edited]
-  issue_comment:
-    types: [created]
-  pull_request:
-    types: [opened, synchronize]
-  workflow_dispatch:
-    inputs:
-      prompt:
-        description: 'Task for the agent'
-        required: true
-
-jobs:
-  agent:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - uses: agent-of-mkmeral/strands-coder@v1
-        with:
-          prompt: ${{ github.event.inputs.prompt || 'Respond to this GitHub event' }}
-          provider: bedrock
-          aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-```
-
-### 2. Add secrets
-
-| Secret | Description |
-|--------|-------------|
-| `AWS_ROLE_ARN` | ARN of IAM role with Bedrock access ([setup guide](#-github-actions-setup-recommended)) |
-| `PAT_TOKEN` | GitHub Personal Access Token with repo permissions |
-
-### 3. Trigger the agent
-
-- **Open an issue** → Agent responds automatically
-- **Comment on PR** → Agent reviews and suggests
-- **Manual dispatch** → Run any prompt on-demand
-
-> 💡 **Alternative providers**: Set `provider: anthropic` with `ANTHROPIC_API_KEY`, or `provider: openai` with `OPENAI_API_KEY`
+| What | How |
+|------|-----|
+| **Mention the agent** | `@agent-of-mkmeral` in any issue, PR, or discussion comment |
+| **Response time** | ~15 minutes (mention polling interval) |
+| **Trigger manually** | Actions → Agent → Run workflow → enter prompt |
+| **See live logs** | Actions tab → click running workflow |
+| **Dashboard** | [agent-of-mkmeral.github.io/strands-dashboard](https://agent-of-mkmeral.github.io/strands-dashboard/) |
 
 ---
 
-## How It Works
+## 📖 How to Use
 
-```mermaid
-graph LR
-    A[GitHub Event<br/>'Issue opened'] --> B[Strands Agent]
-    B --> C[Context Injection<br/>GraphQL]
-    C --> D[Knowledge Base<br/>RAG Retrieval]
-    D --> E[Agent Reasoning<br/>Claude]
-    E --> F[Tool Execution<br/>GitHub/Projects]
-    F --> G[Knowledge Storage<br/>Learning]
-    G --> H[Self-Evolution<br/>Prompt Updates]
+### Mentioning the Agent
 
-    classDef input fill:#2ea44f,stroke:#1b7735,color:#fff
-    classDef agent fill:#0969da,stroke:#044289,color:#fff
-    classDef knowledge fill:#8250df,stroke:#5a32a3,color:#fff
-    classDef action fill:#bf8700,stroke:#875e00,color:#fff
+Mention `@agent-of-mkmeral` anywhere in a `strands-agents/*` repository:
 
-    class A input
-    class B,E agent
-    class C,D,G knowledge
-    class F,H action
+```
+@agent-of-mkmeral please review this PR and suggest improvements
 ```
 
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph Triggers["⚡ Event Triggers"]
-        GH[GitHub Events]
-        SC[Schedule: */4 hours]
-        CL[Control Loop: Hourly]
-        WD[Workflow Dispatch]
-    end
-
-    subgraph Agent["🤖 Strands Agent"]
-        direction TB
-        AR[Agent Runner]
-        CTX[Context Builder]
-        SP[System Prompt]
-    end
-
-    subgraph Tools["🔧 Tool Registry"]
-        direction TB
-        UG[use_github]
-        PR[projects]
-        SCH[scheduler]
-        SUB[create_subagent]
-        KB[store_in_kb]
-        SYS[system_prompt]
-    end
-
-    subgraph External["☁️ External Services"]
-        direction TB
-        GQL[GitHub GraphQL]
-        BKB[Bedrock KB]
-        LF[Langfuse]
-        S3[S3 Sessions]
-    end
-
-    GH --> AR
-    SC --> AR
-    CL --> WD
-    WD --> AR
-    AR --> CTX
-    CTX --> SP
-    AR --> Tools
-    UG --> GQL
-    PR --> GQL
-    KB --> BKB
-    AR --> LF
-    AR --> S3
-
-    classDef triggerStyle fill:#2ea44f,stroke:#1b7735,color:#fff
-    classDef agentStyle fill:#0969da,stroke:#044289,color:#fff
-    classDef toolStyle fill:#8250df,stroke:#5a32a3,color:#fff
-    classDef externalStyle fill:#bf8700,stroke:#875e00,color:#fff
-
-    class GH,SC,CL,WD triggerStyle
-    class AR,CTX,SP agentStyle
-    class UG,PR,SCH,SUB,KB,SYS toolStyle
-    class GQL,BKB,LF,S3 externalStyle
+```
+@agent-of-mkmeral can you write tests for the new streaming module?
 ```
 
-## 🌐 Web Dashboard
+```
+@agent-of-mkmeral investigate the memory leak reported in #42
+```
 
-**Live Demo:** [dev.strands.my](https://dev.strands.my)
+The agent picks up mentions **every 15 minutes** via `mentions.yml`. It checks that the mentioning user is in `AUTHORIZED_USERS`, then dispatches the main `agent.yml` workflow with the full issue/PR context.
 
-A zero-install PWA dashboard for managing your Strands Coder agent:
+### What It Can Do
 
-| Tab | Features |
-|-----|----------|
-| 📊 **Dashboard** | Project stats, GitHub Project board integration |
-| 📋 **Issues** | Browse, filter, create issues with full thread view |
-| ⚡ **Actions** | Live log streaming, issue-linked workflow runs |
-| 📈 **Traces** | Langfuse integration with conversation playback |
-| 🤖 **Agent** | Configure model, tools, MCP servers, knowledge base |
-| 📅 **Schedule** | Cron job management with enable/disable |
-| ⚙️ **Settings** | GitHub & Langfuse config, encrypted share links |
+- **Review PRs** — inline code suggestions with `suggestion` blocks
+- **Implement features** — writes code, runs tests, creates PRs
+- **Triage issues** — asks clarifying questions, proposes solutions
+- **Write docs** — follows the Strands style guide
+- **Manage project boards** — tracks work in GitHub Projects V2
+- **Schedule tasks** — cron-based recurring jobs
 
 <details>
-<summary><b>Dashboard Setup</b></summary>
+<summary><b>Manual Dispatch (workflow_dispatch)</b></summary>
 
-1. **Open** [dev.strands.my](https://dev.strands.my) on any device
-2. **Configure** GitHub token and repository in Settings
-3. **Optionally** add Langfuse credentials for trace viewing
-4. **Share** encrypted config links with your team
+Go to **Actions → Agent → Run workflow** and enter a freeform prompt:
 
-The dashboard connects directly to GitHub and Langfuse APIs from your browser—no backend required.
+```
+Review all open PRs in strands-agents/sdk-python and summarize status
+```
 
-**Self-Host:** Deploy `docs/index.html` to any static hosting (GitHub Pages, Cloudflare, etc.)
+You can optionally override `system_prompt` and `tools` for the run.
 
 </details>
 
 ---
 
-## Quick Start
+## 🏗️ Design
 
-```python
-from strands import Agent
-from strands_coder import use_github, projects, scheduler, store_in_kb
+The agent is built with [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and runs entirely in GitHub Actions. No persistent infrastructure — each invocation spins up a fresh runner, does its work, and shuts down.
 
-# Create agent with GitHub tools
-agent = Agent(
-    tools=[use_github, projects, scheduler, store_in_kb],
-    system_prompt="You are an autonomous GitHub agent."
-)
-
-# Review open PRs
-agent("List all open pull requests and summarize their status")
-
-# Add issue to project board
-agent("Add issue #42 to the project and set status to 'In Progress'")
-
-# Schedule recurring task
-agent("Schedule a daily code review job at 9 AM UTC")
 ```
-
-## Installation
-
-```bash
-pip install strands-coder
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/agent-of-mkmeral/strands-coder
-cd strands-coder
-pip install -e .
+┌─────────────────────────────────────────────────┐
+│  GitHub Events (issues, PRs, comments, etc.)    │
+│  @mentions (polled every 15 min)                │
+│  Scheduled jobs (hourly control loop)           │
+│  Manual dispatch (workflow_dispatch)            │
+└────────────────────┬────────────────────────────┘
+                     ▼
+┌─────────────────────────────────────────────────┐
+│  agent.yml                                      │
+│  ┌───────────┐  ┌───────────┐  ┌─────────────┐ │
+│  │ Auth Check ├──┤ Checkout  ├──┤ Agent Runner │ │
+│  │ (secret)   │  │           │  │ (Python)    │ │
+│  └───────────┘  └───────────┘  └──────┬──────┘ │
+└────────────────────────────────────────┼────────┘
+                                         ▼
+          ┌──────────────────────────────────────┐
+          │  Strands Agent                       │
+          │  ├─ Context injection (GraphQL)      │
+          │  ├─ KB retrieval (Bedrock RAG)       │
+          │  ├─ LLM reasoning (Claude)           │
+          │  ├─ Tool execution                   │
+          │  │   ├─ use_github (GraphQL API)     │
+          │  │   ├─ shell (code, tests, git)     │
+          │  │   ├─ projects (GitHub Projects)   │
+          │  │   ├─ scheduler (cron jobs)        │
+          │  │   ├─ create_subagent (parallel)   │
+          │  │   └─ store_in_kb (memory)         │
+          │  └─ KB storage (learnings)           │
+          └──────────────────────────────────────┘
 ```
 
 <details>
-<summary><b>🔐 GitHub Actions Setup (Recommended)</b></summary>
+<summary><b>Workflow Files</b></summary>
 
-### 1. Configure Secrets
+| File | Purpose | Trigger |
+|------|---------|---------|
+| `agent.yml` | Main agent — handles all events, dispatches, scheduled runs | Issues, PRs, comments, discussions, workflow_dispatch |
+| `mentions.yml` | Polls GitHub notifications for `@agent-of-mkmeral` mentions across all repos | Every 15 minutes (cron) |
+| `control.yml` | Checks `AGENT_SCHEDULES` variable and dispatches due jobs to `agent.yml` | Hourly (cron) or manual |
+| `auto-release.yml` | Builds and publishes to PyPI on version tags | Push `v*.*.*` tag |
 
-```yaml
-# Repository Settings → Secrets and variables → Actions → Secrets
-AWS_ROLE_ARN: arn:aws:iam::YOUR_ACCOUNT:role/StrandsCoder
-PAT_TOKEN: ghp_xxxxxxxxxxxxx
-AUTHORIZED_USERS: octocat,yourname,github-actions[bot]
+</details>
 
-# Optional - Observability
-LANGFUSE_BASE_URL: https://cloud.langfuse.com
-LANGFUSE_PUBLIC_KEY: pk-lf-xxx
-LANGFUSE_SECRET_KEY: sk-lf-xxx
+<details>
+<summary><b>Code Structure</b></summary>
+
 ```
-
-### 2. Configure Variables
-
-```yaml
-# Repository Settings → Secrets and variables → Actions → Variables
-SYSTEM_PROMPT: "Your custom instructions here"
-STRANDS_CODER_PROJECT_ID: PVT_kwDOAbcDefg
-STRANDS_KNOWLEDGE_BASE_ID: YOUR_KB_ID
-STRANDS_MODEL_ID: global.anthropic.claude-opus-4-5-20251101-v1:0
-STRANDS_TOOLS: strands_tools:shell,retrieve;strands_coder:use_github,projects,scheduler
-```
-
-### 3. Deploy Workflows
-
-```bash
-git add .github/workflows/agent.yml .github/workflows/control.yml
-git commit -m "feat: add strands-coder agent"
-git push origin main
+strands-coder/
+├── strands_coder/
+│   ├── agent_runner.py          # Entry point — loads tools, model, runs agent
+│   ├── context.py               # System prompt assembly, GitHub event context
+│   ├── activity.py              # Activity tracking & throttle enforcement
+│   └── tools/
+│       ├── use_github.py        # GitHub GraphQL with guardrails
+│       ├── github_guardrails.py # Owner allowlist enforcement
+│       ├── projects.py          # GitHub Projects V2 management
+│       ├── scheduler.py         # Cron job management
+│       ├── create_subagent.py   # Parallel agent spawning
+│       ├── store_in_kb.py       # Bedrock KB storage (async)
+│       └── system_prompt.py     # Runtime prompt modification
+├── skills/                      # Task-specific SOPs (loaded on demand)
+│   ├── task-implementer/        # TDD implementation workflow
+│   ├── task-reviewer/           # Code review workflow
+│   ├── task-doc-writer/         # Documentation writing
+│   ├── task-adversarial-tester/ # Break things on purpose
+│   ├── task-refiner/            # Issue refinement
+│   └── task-release-notes/      # Release note generation
+├── action.yml                   # GitHub Action composite definition
+├── SYSTEM_PROMPT.md             # Agent's full system prompt (SOPs, rules)
+└── .github/workflows/           # CI/CD workflows
 ```
 
 </details>
 
-## Event Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant GitHub as GitHub Event
-    participant Agent as Strands Agent
-    participant KB as Knowledge Base
-    participant Tools as Tool Registry
-
-    User->>GitHub: Opens Issue #42
-    GitHub->>Agent: Trigger workflow
-    
-    Agent->>Agent: fetch_github_event_context()
-    Note over Agent: GraphQL: Full thread + comments
-    
-    Agent->>KB: retrieve(issue_content)
-    KB-->>Agent: Similar issues & solutions
-    
-    Agent->>Agent: Reasoning with context
-    
-    Agent->>Tools: use_github(add_comment)
-    Agent->>Tools: projects(update_status)
-    
-    Agent->>KB: store_in_kb(conversation)
-    Note over KB: Learning for future
-    
-    Agent-->>GitHub: Comment posted
-    GitHub-->>User: Notification
-```
-
-## Tools Reference
-
-### use_github
-
-Universal GitHub GraphQL API interface for queries and mutations.
-
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `query` | `query`, `variables` | Execute GraphQL query | `"Get repository info"` |
-| `mutation` | `query`, `variables` | Execute GraphQL mutation | `"Create issue"` |
-
-**Natural Language Examples:**
-
-```python
-# Query repository
-agent("List all open issues in this repository")
-
-# Create PR comment
-agent("Add a review comment to PR #45 suggesting code improvements")
-
-# Close issue
-agent("Close issue #42 with a summary comment")
-```
-
 <details>
-<summary><b>GraphQL Query Examples</b></summary>
+<summary><b>Context Injection</b></summary>
 
-```python
-# Get repository info
-agent.tool.use_github(
-    query_type="query",
-    query="""
-    query($owner: String!, $name: String!) {
-      repository(owner: $owner, name: $name) {
-        name
-        description
-        stargazerCount
-        issues(states: OPEN) { totalCount }
-      }
-    }
-    """,
-    variables={"owner": "strands-agents", "name": "sdk-python"},
-    label="Get repository info"
-)
-```
+Every agent run gets **full conversation context** injected into the system prompt — not just the latest message:
+
+1. **Raw `GITHUB_CONTEXT`** — the complete event payload
+2. **GraphQL enrichment** — fetches all comments, reviews, linked items, timeline events
+3. **Project context** — current project board state (if configured)
+4. **Knowledge Base retrieval** — semantically similar past interactions
+5. **Self-awareness** — the agent's own source code (for debugging itself)
+
+This means when you mention the agent in comment #15 of an issue, it sees the entire thread — all 14 prior comments, linked PRs, and project status.
 
 </details>
 
 ---
 
-### projects
+## 🔒 Security & Guardrails
 
-GitHub Projects V2 management for cross-repository work tracking.
+Multiple layers prevent misuse and contain blast radius:
 
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `list_projects` | `owner` | List all projects | `"List my projects"` |
-| `get_project` | `project_id` | Get project details | `"Show project status"` |
-| `add_issue` | `repository`, `issue_number` | Add issue to project | `"Track issue #42"` |
-| `add_pr` | `repository`, `pr_number` | Add PR to project | `"Track PR #45"` |
-| `update_item` | `item_id`, `field_name`, `field_value` | Update item field | `"Set status to Done"` |
-| `get_progress` | - | Get progress summary | `"Show project progress"` |
+| Layer | What | How |
+|-------|------|-----|
+| **User authorization** | Only approved users can trigger the agent | `AUTHORIZED_USERS` secret checked in `agent.yml` |
+| **Mention authorization** | Only approved users' @mentions are processed | `mentions.yml` verifies author before dispatch |
+| **Self-trigger protection** | Agent can't trigger itself via comments | `agent.yml` blocks agent account except for `workflow_dispatch` |
+| **Owner allowlist** | Agent can only access repos owned by `agent-of-mkmeral`, `strands-agents`, `strands-labs`, `mkmeral` | `github_guardrails.py` — enforced at tool level |
+| **Activity throttling** | Max 30 external actions per 24h, auto-enforced on all mutations | `activity.py` → `enforce_throttle()` called by `use_github.py` and `github_tools.py` |
+| **Token separation** | `GITHUB_TOKEN` for own repos, `PAT_TOKEN` for upstream | Prevents recursive workflow triggers |
+| **Mutation consent** | Mutations require confirmation (bypassed in CI) | `BYPASS_TOOL_CONSENT=true` in Actions |
+| **Dashboard warnings** | Real-time alerts for unauthorized repos, throttle breaches, failures | Dashboard tab — auto-computed from live data |
 
-**Natural Language Examples:**
+
+<details>
+<summary><b>AUTHORIZED_USERS</b></summary>
+
+Stored as a **repository secret** (`Settings → Secrets → AUTHORIZED_USERS`). Comma-separated list of GitHub usernames:
+
+```
+mkmeral,ryanycoleman,zastrowm,yonib05,Unshure,chaynabors,afarntrog,notowen333,...
+```
+
+Both `agent.yml` (direct triggers) and `mentions.yml` (cross-repo mentions) check this list. Unauthorized users are silently ignored — no error response, no notification.
+
+To **add a maintainer**: Update the `AUTHORIZED_USERS` secret with their GitHub username.
+
+</details>
+
+<details>
+<summary><b>Owner Allowlist (github_guardrails.py)</b></summary>
+
+Every `use_github` GraphQL call passes through `validate_graphql_owner()` which checks that the target repository owner is in `ALLOWED_OWNERS`:
 
 ```python
-# Add issue to project
-agent("Add issue #42 from strands-agents/sdk-python to my project")
-
-# Update status
-agent("Mark the item for issue #42 as 'In Progress'")
-
-# Get summary
-agent("Show me the project progress with counts by status")
+ALLOWED_OWNERS = {
+    "agent-of-mkmeral",
+    "strands-agents",
+    "strands-labs",
+    "mkmeral",
+}
 ```
+
+If the agent tries to interact with a repo outside this list, the request is **blocked at the application level** — even if the PAT token has broader permissions.
+
+The list can be extended at runtime via the `STRANDS_ALLOWED_OWNERS` environment variable (comma-separated). The `_get_allowed_owners()` helper merges both sources.
+
+To modify: Edit `strands_coder/tools/github_guardrails.py` or set the `STRANDS_ALLOWED_OWNERS` env var.
+
+</details>
+
+<details>
+<summary><b>Self-Trigger Protection</b></summary>
+
+The agent account (`agent-of-mkmeral`) **cannot** trigger itself through normal GitHub events:
+
+```yaml
+# From agent.yml
+if [ "${{ github.actor }}" = "$AGENT_ACCOUNT" ]; then
+  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+    # ✅ Allowed — explicit sub-agent handoff
+  else
+    # ❌ Blocked — prevents infinite comment→trigger loops
+  fi
+fi
+```
+
+This means if the agent posts a comment on a PR, that comment won't re-trigger the agent. The only way the agent can invoke itself is through explicit `workflow_dispatch` (used by sub-agents).
+
+</details>
 
 ---
 
-### scheduler
+## 📊 Observability
 
-Cron-based and one-time job scheduling via GitHub Actions variables.
+### Traces
 
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `list` | - | List all scheduled jobs | `"List scheduled jobs"` |
-| `add` | `job_id`, `cron`/`run_at`, `prompt` | Add new job | `"Schedule daily review"` |
-| `remove` | `job_id` | Remove job | `"Remove daily_review job"` |
-| `enable` | `job_id` | Enable disabled job | `"Enable weekly_report"` |
-| `disable` | `job_id` | Disable job | `"Pause daily_review"` |
-| `check` | - | Check jobs due now | `"What jobs should run?"` |
+Two observability backends are supported:
 
-**Natural Language Examples:**
+| Backend | Setup | What You See |
+|---------|-------|--------------|
+| **AWS Bedrock GenAI Console** | Set `enable_otel: true` in `agent.yml` | Traces in the Bedrock Observability dashboard |
+| **Langfuse** | Set `LANGFUSE_*` secrets | Full trace trees, token costs, conversation replay |
 
-```python
-# Schedule recurring job
-agent("Schedule a job called 'daily_review' to run at 9 AM UTC daily with prompt 'Review open PRs'")
+All traces are tagged with `issue:{number}` so you can filter by the GitHub issue/PR that triggered the run.
 
-# One-time scheduled job
-agent("Schedule deployment for January 20th at 2 PM UTC, auto-remove after execution")
+<details>
+<summary><b>AgentCore Observability Setup</b></summary>
 
-# Disable temporarily
-agent("Disable the daily_review job")
+The `action.yml` sets the correct env vars for the [AWS docs for non-runtime agents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html#observability-configure-3p):
+
+```yaml
+# In agent.yml
+enable_otel: ${{ vars.STRANDS_OTEL_ENABLED || 'false' }}
 ```
+
+This installs `aws-opentelemetry-distro>=0.10.1`, sets `OTEL_PYTHON_DISTRO=aws_distro`, and runs the agent through `opentelemetry-instrument`. Traces appear in the Bedrock GenAI observability console under service name `strands-coder`.
+
+</details>
+
+<details>
+<summary><b>Langfuse Setup</b></summary>
+
+Add these **secrets**:
+
+```
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+LANGFUSE_SECRET_KEY=sk-lf-xxx
+```
+
+The agent auto-configures OTEL to export to Langfuse. Traces include:
+- Full LLM reasoning chains
+- Tool call inputs/outputs
+- Token usage and costs
+- Session continuity across runs
+
+</details>
+
+### Knowledge Base (Memory)
+
+The agent uses an **Amazon Bedrock Knowledge Base** for persistent memory:
+
+- **Before each run:** `retrieve()` — fetches semantically similar past interactions
+- **After each run:** `store_in_kb()` — stores the execution summary
+
+This gives the agent context from previous runs. Configure via `STRANDS_KNOWLEDGE_BASE_ID` repo variable.
+
+### Session Persistence
+
+Conversation history is stored in **S3** for multi-turn sessions:
+
+```
+S3_SESSION_BUCKET=my-bucket
+S3_SESSION_PREFIX=strands-coder/sessions/
+```
+
+### Dashboard
+
+The dashboard is hosted publicly at [**agent-of-mkmeral/strands-dashboard**](https://github.com/agent-of-mkmeral/strands-dashboard):
+
+| Page | URL | What |
+|------|-----|------|
+| 📊 **Dashboard** | [strands-dashboard](https://agent-of-mkmeral.github.io/strands-dashboard/) | Project board, issues, actions, traces, agent config, schedule, **warnings** |
+| 🌍 **Wild** | [strands-dashboard/#wild](https://agent-of-mkmeral.github.io/strands-dashboard/#wild) | Open PRs & issues the agent created in external public repos |
+| 📈 **Activity** | [activity.html](https://agent-of-mkmeral.github.io/strands-dashboard/activity.html) | Agent activity overview across all public repos |
+
+<details>
+<summary><b>Dashboard Warnings</b></summary>
+
+The Dashboard tab includes a **warnings system** that surfaces issues in real time. Warnings appear at the top of the page, above the project stats grid:
+
+| Severity | Warning | Trigger |
+|----------|---------|---------|
+| 🔴 **Critical** | Unauthorized Repo Interaction | Activity detected in repos outside allowed owners |
+| 🔴 **Critical** | Throttle Limit Exceeded | ≥30 external actions in 24h |
+| 🟡 **Warning** | Approaching Throttle | ≥80% of daily limit used (≥24/30) |
+| 🟡 **Warning** | Consecutive Failures | 3+ failed actions in a row |
+| 🟡 **Warning** | Long-Running Action | Action running >45 minutes |
+| 🟡 **Warning** | High Failure Rate | >50% of last 10 runs failed |
+| 🔵 **Info** | Stale External Items | Open PRs/issues with no updates for 7+ days |
+
+Warnings are severity-colored (red/amber/blue) with icons and detail text. A badge on the Dashboard nav tab shows the count (red dot for critical, amber for warnings). If there are no warnings, the dashboard is clean — no noise.
+
+</details>
+
+---
+
+## ⚙️ Configuration
+
+All configuration lives in **repository variables and secrets** — no code changes needed.
+
+### Secrets (Settings → Secrets → Actions)
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `AWS_ROLE_ARN` | ✅ | IAM role for Bedrock access (OIDC) |
+| `PAT_TOKEN` | ✅ | GitHub PAT with repo + workflow permissions |
+| `AUTHORIZED_USERS` | ✅ | Comma-separated authorized usernames |
+| `LANGFUSE_BASE_URL` | ❌ | Langfuse host (e.g., `https://cloud.langfuse.com`) |
+| `LANGFUSE_PUBLIC_KEY` | ❌ | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | ❌ | Langfuse secret key |
+
+### Variables (Settings → Variables → Actions)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STRANDS_PROVIDER` | `bedrock` | Model provider |
+| `STRANDS_MODEL_ID` | (SDK default) | Model ID (e.g., `us.anthropic.claude-sonnet-4-5-20250929-v1:0`) |
+| `STRANDS_MAX_TOKENS` | (SDK default) | Max output tokens |
+| `STRANDS_TOOLS` | (see agent.yml) | Tool configuration string |
+| `STRANDS_KNOWLEDGE_BASE_ID` | — | Bedrock Knowledge Base ID for RAG |
+| `STRANDS_CODER_PROJECT_ID` | — | GitHub Project V2 node ID |
+| `S3_SESSION_BUCKET` | — | S3 bucket for session persistence |
+| `AGENT_SCHEDULES` | `{}` | JSON schedule configuration |
+| `MCP_SERVERS` | — | MCP server configuration JSON |
+| `SYSTEM_PROMPT` | (from SYSTEM_PROMPT.md) | System prompt override |
+| `STRANDS_ALLOWED_OWNERS` | — | Additional allowed repo owners (comma-separated, merged with built-in list) |
+| `STRANDS_OTEL_ENABLED` | `false` | Enable AgentCore observability |
 
 <details>
 <summary><b>AGENT_SCHEDULES Format</b></summary>
@@ -429,425 +396,190 @@ agent("Disable the daily_review job")
       "cron": "0 9 * * *",
       "enabled": true,
       "prompt": "Review open PRs and provide feedback",
-      "system_prompt": "You are a code reviewer",
-      "tools": "strands_tools:shell;strands_coder:use_github",
-      "model": "global.anthropic.claude-sonnet-4-5-20251101-v1:0"
+      "tools": "strands_tools:shell;strands_coder:use_github"
     },
-    "friday_deploy": {
-      "run_at": "2026-01-17T15:00:00Z",
-      "prompt": "Deploy release to production",
-      "once": true
+    "weekly_report": {
+      "cron": "0 10 * * 1",
+      "enabled": true,
+      "prompt": "Generate weekly status report"
     }
-  },
-  "timezone": "UTC"
+  }
 }
 ```
 
-**Cron Expression Reference:**
-
-```
-┌───────────── minute (0-59)
-│ ┌─────────── hour (0-23)
-│ │ ┌───────── day of month (1-31)
-│ │ │ ┌─────── month (1-12)
-│ │ │ │ ┌───── day of week (0-6, Sunday=0)
-│ │ │ │ │
-* * * * *
-
-0 * * * *     # Every hour
-0 9 * * *     # Daily at 9:00 AM
-0 9 * * 1-5   # Weekdays at 9:00 AM
-0 */4 * * *   # Every 4 hours
-```
+Cron format: `minute hour day month weekday`
 
 </details>
 
----
-
-### create_subagent
-
-Spawn parallel sub-agents via GitHub Actions workflow dispatch.
-
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `create` | `repository`, `workflow_id`, `prompt`, `model`, `tools` | Spawn sub-agent | `"Create review agent"` |
-| `status` | `repository`, `run_id` | Check run status | `"Check agent status"` |
-| `list` | `repository`, `workflow_id` | List recent runs | `"List sub-agent runs"` |
-
-**Natural Language Examples:**
-
-```python
-# Spawn specialized sub-agent
-agent("Create a sub-agent to review PR #42 for security issues using Claude Opus")
-
-# Check status
-agent("Check the status of sub-agent run 12345678")
-```
-
 <details>
-<summary><b>Sub-Agent Configuration</b></summary>
+<summary><b>MCP_SERVERS Format</b></summary>
 
-```python
-agent.tool.create_subagent(
-    repository="owner/repo",
-    workflow_id="agent.yml",
-    prompt="Review PR #42 for security vulnerabilities",
-    model="global.anthropic.claude-opus-4-5-20251101-v1:0",
-    max_tokens=60000,
-    tools="strands_tools:shell,retrieve",
-    system_prompt="You are a security expert focused on code review"
-)
-```
-
-</details>
-
----
-
-### store_in_kb
-
-Async knowledge base storage for persistent memory across sessions.
-
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `store` | `content`, `title` | Store content | `"Remember this solution"` |
-
-**Natural Language Examples:**
-
-```python
-# Store learning
-agent("Store in knowledge base: 'Memory leaks fixed by implementing proper cleanup in __del__'")
-```
-
----
-
-### system_prompt
-
-Self-modification tool for runtime prompt updates.
-
-| Action | Parameters | Description | Example |
-|--------|------------|-------------|---------|
-| `view` | - | View current prompt | `"Show system prompt"` |
-| `update` | `prompt`, `repository` | Replace prompt | `"Update my instructions"` |
-| `add_context` | `context`, `repository` | Append context | `"Remember this pattern"` |
-| `reset` | - | Reset to default | `"Reset system prompt"` |
-
-**Natural Language Examples:**
-
-```python
-# Add learning
-agent("Add to system prompt: 'Users prefer detailed code explanations with examples'")
-
-# Sync to GitHub
-agent("Update system prompt and sync to repository variable")
-```
-
----
-
-## Context Injection
-
-The agent sees full conversation context, not just the latest message:
-
-```mermaid
-flowchart LR
-    subgraph Event["📥 GitHub Event"]
-        E1[Issue Created]
-        E2[Comment Added]
-        E3[PR Reviewed]
-    end
-
-    subgraph Context["📋 Context Builder"]
-        direction TB
-        C1[Raw GITHUB_CONTEXT]
-        C2[GraphQL Enrichment]
-        C3[Comments Thread]
-        C4[Linked Items]
-        C5[Project Status]
-    end
-
-    subgraph Prompt["🧠 System Prompt"]
-        P1[Base Instructions]
-        P2[Event Context]
-        P3[Project Context]
-        P4[Self-Awareness]
-    end
-
-    Event --> Context
-    Context --> Prompt
-    Prompt --> Agent[Agent]
-
-    classDef eventStyle fill:#2ea44f,stroke:#1b7735,color:#fff
-    classDef contextStyle fill:#8250df,stroke:#5a32a3,color:#fff
-    classDef promptStyle fill:#0969da,stroke:#044289,color:#fff
-
-    class E1,E2,E3 eventStyle
-    class C1,C2,C3,C4,C5 contextStyle
-    class P1,P2,P3,P4 promptStyle
-```
-
-<details>
-<summary><b>Example Injected Context</b></summary>
-
-```markdown
-## 📋 RAW GITHUB_CONTEXT
-**Event Type:** `issue_comment`
-**Repository:** `owner/repo`
-**Action:** `created`
-**Actor:** `alice`
-
-## 🎫 ISSUE CONTEXT
-**Issue:** #42: Memory leak in agent loop
-**State:** open | **Author:** @alice | **Created:** 2026-01-09
-
-### Original Issue Body
-The agent seems to leak memory when running for extended periods...
-
-### 💬 Comments (5 total)
-**Comment #1** by @bob at 2026-01-09 14:32:
-I've seen this too. Here's a stack trace...
-
-**Comment #2** by @strands-agent at 2026-01-09 15:15:
-I've analyzed the code and found the issue in the event loop...
-
-### 🔗 Linked Items
-- PR #45: Fix memory leak (OPEN)
-
-## 📊 PROJECT CONTEXT
-**Project:** Strands-Coder (#1)
-- Todo: 5 | In Progress: 3 | Done: 42
-```
-
-</details>
-
-## Two-Workflow Architecture
-
-```mermaid
-flowchart TB
-    subgraph agent["agent.yml (Main Agent)"]
-        A1[GitHub Events] --> A2[Event Handler]
-        A3[Schedule: */4 hours] --> A2
-        A4[Workflow Dispatch] --> A2
-        A2 --> A5[Agent Runner]
-        A5 --> A6[Tool Execution]
-    end
-
-    subgraph control["control.yml (Scheduler)"]
-        C1[Schedule: Hourly] --> C2[Parse AGENT_SCHEDULES]
-        C2 --> C3{Jobs Due?}
-        C3 -->|Yes| C4[Dispatch agent.yml]
-        C3 -->|No| C5[Skip]
-    end
-
-    C4 --> A4
-
-    classDef mainStyle fill:#0969da,stroke:#044289,color:#fff
-    classDef controlStyle fill:#8250df,stroke:#5a32a3,color:#fff
-
-    class A1,A2,A3,A4,A5,A6 mainStyle
-    class C1,C2,C3,C4,C5 controlStyle
-```
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `agent.yml` | Events, Schedule, Dispatch | Main agent execution |
-| `control.yml` | Hourly | Check `AGENT_SCHEDULES` and dispatch jobs |
-
-## Observability
-
-```mermaid
-flowchart LR
-    subgraph Agent["🤖 Agent Execution"]
-        A1[Start] --> A2[Reasoning]
-        A2 --> A3[Tool Calls]
-        A3 --> A4[Complete]
-    end
-
-    subgraph Telemetry["📊 Telemetry"]
-        T1[OTEL Exporter]
-        T2[Trace Attributes]
-        T3[Issue Linking]
-    end
-
-    subgraph Langfuse["🔭 Langfuse"]
-        L1[Traces]
-        L2[Generations]
-        L3[Tool Calls]
-        L4[Costs]
-    end
-
-    Agent --> Telemetry
-    Telemetry --> Langfuse
-
-    classDef agentStyle fill:#2ea44f,stroke:#1b7735,color:#fff
-    classDef telStyle fill:#bf8700,stroke:#875e00,color:#fff
-    classDef lfStyle fill:#4B32C3,stroke:#3a2799,color:#fff
-
-    class A1,A2,A3,A4 agentStyle
-    class T1,T2,T3 telStyle
-    class L1,L2,L3,L4 lfStyle
-```
-
-**Features:**
-- 🏷️ **Trace Linking**: All traces tagged with `issue:{number}` for filtering
-- 💬 **Conversation View**: Timeline of agent reasoning
-- 💰 **Cost Tracking**: Token usage and costs per trace
-- 🔄 **Session Persistence**: S3-backed conversation history
-
-<details>
-<summary><b>Dashboard Features</b></summary>
-
-The web dashboard at [dev.strands.my](https://dev.strands.my) (also available as `docs/index.html`) provides:
-
-| Tab | Description |
-|-----|-------------|
-| 📋 **Issues** | Browse, search, create issues |
-| 📊 **Dashboard** | Project stats and board overview |
-| ⚡ **Actions** | Workflow runs with live logs |
-| 📈 **Traces** | Langfuse traces with playback |
-| 📅 **Schedule** | Job scheduler management |
-| 🤖 **Agent** | Model, tools, prompt configuration |
-| ⚙️ **Settings** | GitHub & Langfuse credentials |
-
-</details>
-
-## Project Structure
-
-```
-strands-coder/
-├── strands_coder/
-│   ├── __init__.py              # Package exports
-│   ├── agent_runner.py          # Main entry point
-│   ├── context.py               # Context builder & prompt assembly
-│   └── tools/
-│       ├── __init__.py          # Tool exports
-│       ├── use_github.py        # GitHub GraphQL interface
-│       ├── github_tools.py      # GitHub REST helpers
-│       ├── projects.py          # GitHub Projects V2
-│       ├── scheduler.py         # Job scheduling
-│       ├── create_subagent.py   # Parallel agent spawning
-│       ├── store_in_kb.py       # Knowledge base storage
-│       └── system_prompt.py     # Self-modification
-├── .github/
-│   └── workflows/
-│       ├── agent.yml            # Main agent workflow
-│       └── control.yml          # Scheduler control loop
-├── docs/
-│   └── index.html               # Web dashboard
-├── action.yml                   # GitHub Action definition
-└── pyproject.toml               # Package configuration
-```
-
-## Model Configuration
-
-| Model | Use Case | Max Tokens |
-|-------|----------|------------|
-| `global.anthropic.claude-opus-4-5-20251101-v1:0` | Complex reasoning | 60,000 |
-| `global.anthropic.claude-sonnet-4-5-20251101-v1:0` | Balanced performance | 60,000 |
-| `us.anthropic.claude-sonnet-4-20250514-v1:0` | Fast & efficient | 32,768 |
-
-<details>
-<summary><b>MCP Server Configuration</b></summary>
-
-```yaml
-MCP_SERVERS: |
-  {
-    "mcpServers": {
-      "strands-docs": {
-        "command": "uvx",
-        "args": ["strands-agents-mcp-server"],
-        "disabled": false,
-        "disabledTools": []
-      },
-      "custom-server": {
-        "url": "http://localhost:8000/mcp"
-      }
+```json
+{
+  "mcpServers": {
+    "strands-docs": {
+      "command": "uvx",
+      "args": ["strands-agents-mcp-server"],
+      "disabled": false,
+      "disabledTools": []
     }
   }
+}
 ```
 
 </details>
 
-## Example: Complete Workflow
+<details>
+<summary><b>Tools Configuration String</b></summary>
 
-```python
-#!/usr/bin/env python3
-"""Autonomous GitHub agent example."""
-from strands import Agent
-from strands_coder import (
-    use_github,
-    projects,
-    scheduler,
-    create_subagent,
-    store_in_kb,
-    system_prompt,
-)
+Format: `package:tool1,tool2;package2:tool3,tool4`
 
-# Create agent with full toolset
-agent = Agent(
-    tools=[use_github, projects, scheduler, create_subagent, store_in_kb, system_prompt],
-    system_prompt="""You are an autonomous GitHub agent.
-    - Review PRs with detailed feedback
-    - Track work in GitHub Projects
-    - Learn from every interaction
-    - Schedule recurring maintenance tasks
-    """
-)
-
-# Interactive mode
-while True:
-    user_input = input("\n🤖 > ")
-    if user_input.lower() in ["exit", "quit"]:
-        break
-    agent(user_input)
+Default tools:
+```
+strands_tools:shell,retrieve,slack;strands_coder:use_github,create_subagent,system_prompt,store_in_kb,projects,scheduler
 ```
 
-## CLI Usage
+</details>
 
-```bash
-# Run with prompt
-strands-coder "Review all open PRs"
+---
 
-# Via environment variable
-STRANDS_PROMPT="Create tracking issues for stale PRs" strands-coder
+## 🔴 How to Disable
 
-# With custom configuration
-STRANDS_MODEL_ID="global.anthropic.claude-opus-4-5-20251101-v1:0" \
-STRANDS_TOOLS="strands_coder:use_github,projects" \
-strands-coder "Analyze repository health"
+### Disable everything
+
+**Easiest:** Go to **Settings → Actions → General → Disable Actions**. This stops all workflows — no events, no mentions, no scheduled jobs.
+
+Alternatively:
+1. **Remove or empty `AUTHORIZED_USERS` secret** — blocks all event-triggered runs
+2. **Delete `AWS_ROLE_ARN` secret** — agent can't authenticate to Bedrock
+
+### Disable specific triggers
+
+| What | How |
+|------|-----|
+| **Stop all event reactions** | Comment out the `on:` triggers in `agent.yml` (keep `workflow_dispatch` for manual use) |
+| **Stop cross-repo mentions** | Comment out the `schedule:` in `mentions.yml` |
+| **Stop scheduled jobs** | Comment out the `schedule:` in `control.yml` |
+| **Stop a specific scheduled job** | `scheduler(action="disable", job_id="job_name")` or edit `AGENT_SCHEDULES` variable |
+| **Pause temporarily** | Disable the workflow in GitHub Actions UI (Actions → workflow → ⋯ → Disable workflow) |
+
+### Disable for a specific user
+
+Remove their username from the `AUTHORIZED_USERS` secret.
+
+---
+
+## 🧬 Skills System
+
+The agent loads task-specific SOPs (Standard Operating Procedures) on demand via the **AgentSkills plugin**:
+
+| Skill | When Used |
+|-------|-----------|
+| `task-implementer` | Writing code with TDD, creating PRs |
+| `task-reviewer` | Reviewing PRs with inline suggestions |
+| `task-doc-writer` | Writing documentation following Strands style |
+| `task-adversarial-tester` | Finding bugs, edge cases, security holes |
+| `task-refiner` | Refining issues, asking clarifying questions |
+| `task-release-notes` | Generating release notes from merged PRs |
+
+Skills live in `skills/` — each has a `SKILL.md` with detailed instructions. The agent calls `skills(skill_name="task-reviewer")` before starting a review, which loads the full SOP into context.
+
+**Want to add a new skill?** Just [create an issue](../../issues/new) describing the skill you need and the agent will build it.
+
+---
+
+## 🤖 Agent Behavior Rules
+
+Key rules from `SYSTEM_PROMPT.md` that maintainers should know:
+
+| Rule | Details |
+|------|---------|
+| **Add value or stay silent** | The agent won't post "LGTM" or status updates. If it has nothing concrete to add, it stays quiet |
+| **One comment max** | Per PR/issue — no spam |
+| **Collapsible format** | Every comment uses TL;DR + `<details>` for progressive disclosure |
+| **AI disclosure** | Every public comment ends with `🤖 AI agent response. Strands Agents.` |
+| **Never push to upstream** | Only pushes to `agent-of-mkmeral/*` forks, creates PRs to upstream |
+| **Mentions policy** | Only tags `@mkmeral` — uses backtick formatting for all other usernames |
+| **Test before commit** | Runs `hatch fmt` + `hatch test` before every commit |
+
+<details>
+<summary><b>Full System Prompt</b></summary>
+
+See [`SYSTEM_PROMPT.md`](SYSTEM_PROMPT.md) for the complete agent instructions including:
+- Push policies and repository map
+- Comment format requirements
+- PR review format with suggestion blocks
+- Memory protocol (retrieve → act → store)
+- Sub-agent delegation strategy
+
+</details>
+
+---
+
+## 🔧 Common Operations
+
+<details>
+<summary><b>Change the model</b></summary>
+
+Update the `STRANDS_MODEL_ID` repository variable:
+
+```
+Settings → Variables → Actions → STRANDS_MODEL_ID
 ```
 
-## Contributing
+Available models (Bedrock):
+- `us.anthropic.claude-sonnet-4-5-20250929-v1:0` — balanced (recommended)
+- `us.anthropic.claude-opus-4-20250514-v1:0` — most capable
+- `us.anthropic.claude-sonnet-4-20250514-v1:0` — fast
 
-We welcome contributions! The agent will review your PR automatically. 🧬
+</details>
 
-```bash
-# 1. Fork & clone
-git clone https://github.com/YOUR_USERNAME/strands-coder.git
+<details>
+<summary><b>Add a new authorized user</b></summary>
 
-# 2. Install dev dependencies
-pip install -e ".[dev]"
+1. Go to `Settings → Secrets → Actions → AUTHORIZED_USERS`
+2. Add the GitHub username to the comma-separated list
+3. They can now mention `@agent-of-mkmeral` and it will respond
 
-# 3. Run tests
-hatch run test
+</details>
 
-# 4. Format & lint
-hatch run prepare
+<details>
+<summary><b>Schedule a recurring task</b></summary>
 
-# 5. Submit PR
-git push origin feat/my-feature
+Either ask the agent:
+```
+@agent-of-mkmeral schedule a job called "weekly_review" to run every Monday at 9 AM UTC 
+with prompt "Review all open PRs across strands-agents repos"
 ```
 
-## License
+Or edit the `AGENT_SCHEDULES` variable directly in `Settings → Variables → Actions`.
 
-Apache-2.0 - see [LICENSE](LICENSE) file.
+</details>
 
-## Links
+<details>
+<summary><b>Debug a failed run</b></summary>
 
-<div align="center">
-  <a href="https://github.com/marketplace/actions/strands-coder">Marketplace</a>
-  ◆ <a href="https://github.com/agent-of-mkmeral/strands-coder">GitHub</a>
-  ◆ <a href="https://pypi.org/project/strands-coder/">PyPI</a>
-  ◆ <a href="https://agent-of-mkmeral.github.io/strands-coder/">Dashboard</a>
-  ◆ <a href="https://strandsagents.com/">Strands Docs</a>
-  ◆ <a href="https://aws.amazon.com/bedrock/">AWS Bedrock</a>
-  ◆ <a href="https://cloud.langfuse.com">Langfuse</a>
-</div>
+1. Go to **Actions → Agent** and find the failed run
+2. Check the **Agent** step logs for the full execution trace
+3. Look at **GitHub Actions Summary** for the prompt, result, and session ID
+4. If Langfuse is configured, search traces by the `issue:{number}` tag
+5. If AgentCore is enabled, check the Bedrock GenAI observability console
+
+</details>
+
+<details>
+<summary><b>Update the system prompt</b></summary>
+
+Two options:
+1. **Edit `SYSTEM_PROMPT.md`** — the source of truth, loaded on every run
+2. **Set `SYSTEM_PROMPT` variable** — overrides `SYSTEM_PROMPT.md` if set
+
+The agent can also update its own prompt at runtime via `system_prompt(action="add_context")`.
+
+</details>
+
+---
+
+## 📄 License
+
+Apache-2.0 — see [LICENSE](LICENSE).

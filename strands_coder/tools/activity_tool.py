@@ -51,7 +51,7 @@ def activity(
         result = activity(action="summary")
 
     Environment Variables:
-        STRANDS_THROTTLE_LIMIT: Max external actions per day (default: 30)
+        STRANDS_THROTTLE_LIMIT: Max external actions per day (default: 50)
         GITHUB_REPOSITORY_OWNER: Agent's GitHub username
     """
     try:
@@ -109,5 +109,5 @@ Actions:
 - "check": Quick throttle check (can_proceed boolean)
 
 The agent counts external actions (outside its own repos) toward a daily limit.
-Default limit is 30 actions per day, configurable via STRANDS_THROTTLE_LIMIT.
+Default limit is 50 actions per day, configurable via STRANDS_THROTTLE_LIMIT.
 """

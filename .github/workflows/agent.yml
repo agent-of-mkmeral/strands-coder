@@ -34,10 +34,17 @@ on:
         description: 'Tool config (e.g., strands_tools:shell;strands_coder:use_github)'
         required: false
         type: string
+      session_id:
+        description: 'Session ID for conversation persistence (overrides auto-detection)'
+        required: false
+        type: string
 
 permissions: write-all
 
 jobs:
+  # ==================================================================
+  # Job 1: Main agent — handles the triggering event
+  # ==================================================================
   agent:
     runs-on: ubuntu-latest
     # Model config from repository variables — the single source of truth.
@@ -85,7 +92,7 @@ jobs:
           fi
           
           # For manual/event-triggered runs, check authorization
-          AUTHORIZED_USERS="${{ secrets.AUTHORIZED_USERS }}"
+          AUTHORIZED_USERS="${{ vars.AUTHORIZED_USERS }}"
           
           echo "Checking authorization for user: ${{ github.actor }}"
           
@@ -114,6 +121,9 @@ jobs:
         if: steps.check-auth.outputs.authorized == 'true'
         uses: ./
         env:
+          # Session ID override (from workflow_dispatch input, e.g., mentions workflow)
+          SESSION_ID: ${{ github.event.inputs.session_id || '' }}
+          
           # GitHub tokens
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
@@ -153,6 +163,11 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           
+          # Actor-Critic verification loop (opt-in via repo variable)
+          ACTOR_CRITIC_ENABLED: ${{ vars.ACTOR_CRITIC_ENABLED }}
+          ACTOR_CRITIC_MAX_RETRIES: ${{ vars.ACTOR_CRITIC_MAX_RETRIES }}
+          ACTOR_CRITIC_TIME_BUDGET: ${{ vars.ACTOR_CRITIC_TIME_BUDGET }}
+          
           # Advanced settings
           STRANDS_TOOLS_DIRECTORY: ${{ vars.STRANDS_TOOLS_DIRECTORY }}
         with:
@@ -174,3 +189,335 @@ jobs:
           aws_region: ${{ secrets.AWS_REGION || 'us-west-2' }}
           git_user_email: "217235299+strands-agent@users.noreply.github.com"
           git_user_name: "agent-of-mkmeral"
+          # AgentCore Observability
+          enable_otel: ${{ vars.STRANDS_OTEL_ENABLED || 'false' }}
+
+  # ==================================================================
+  # Job 2: Cross-repo mentions check — runs IN PARALLEL with agent job
+  # Lightweight (~10-20s): polls notifications API, dispatches agents
+  # for any authorized @mentions on other repos.
+  # ==================================================================
+  check-mentions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check user authorization
+        id: check-auth
+        run: |
+          # For scheduled runs, always authorize
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "authorized=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # For workflow_dispatch from control.yml or agent
+          if [ "${{ github.actor }}" = "github-actions[bot]" ]; then
+            echo "authorized=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Agent self-trigger protection
+          AGENT_ACCOUNT="${{ vars.AGENT_ACCOUNT || 'agent-of-mkmeral' }}"
+          if [ "${{ github.actor }}" = "$AGENT_ACCOUNT" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "authorized=true" >> $GITHUB_OUTPUT
+            else
+              echo "authorized=false" >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
+          
+          # Check authorized users
+          AUTHORIZED_USERS="${{ vars.AUTHORIZED_USERS }}"
+          if [[ ",$AUTHORIZED_USERS," == *",${{ github.actor }},"* ]]; then
+            echo "authorized=true" >> $GITHUB_OUTPUT
+          else
+            echo "authorized=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Check cross-repo mentions
+        id: check
+        if: steps.check-auth.outputs.authorized == 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
+          
+          echo "📣 Checking for cross-repo @agent-of-mkmeral mentions..."
+          
+          # Fetch unread notifications (mentions show up as notifications)
+          NOTIFICATIONS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/notifications?all=false&participating=true&per_page=50")
+          
+          # Filter for mention notifications
+          MENTIONS=$(echo "$NOTIFICATIONS" | jq -r '
+            [.[] | select(
+              .reason == "mention" or 
+              .reason == "team_mention"
+            )] | 
+            map({
+              id: .id,
+              reason: .reason,
+              repository: .repository.full_name,
+              subject_type: .subject.type,
+              subject_title: .subject.title,
+              subject_url: .subject.url,
+              updated_at: .updated_at,
+              unread: .unread
+            })
+          ')
+          
+          MENTION_COUNT=$(echo "$MENTIONS" | jq 'length')
+          echo "📬 Found $MENTION_COUNT mention notifications"
+          
+          if [ "$MENTION_COUNT" -gt 0 ]; then
+            echo "has_mentions=true" >> $GITHUB_OUTPUT
+            echo "mentions<<EOF" >> $GITHUB_OUTPUT
+            echo "$MENTIONS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo "$MENTIONS" | jq -r '.[] | "  - [\(.repository)] \(.subject_type): \(.subject_title) (reason: \(.reason))"'
+          else
+            echo "has_mentions=false" >> $GITHUB_OUTPUT
+            echo "✅ No new mentions"
+          fi
+
+      - name: Process cross-repo mentions
+        if: steps.check-auth.outputs.authorized == 'true' && steps.check.outputs.has_mentions == 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MENTIONS: ${{ steps.check.outputs.mentions }}
+          AUTHORIZED_USERS: ${{ vars.AUTHORIZED_USERS }}
+        run: |
+          TOKEN="${PAT_TOKEN:-$GITHUB_TOKEN}"
+          
+          echo "🚀 Processing cross-repo mentions..."
+          
+          # Authorization check function
+          is_authorized() {
+            local author="$1"
+            if [ -z "$author" ] || [ "$author" = "null" ]; then
+              return 1
+            fi
+            if [[ ",$AUTHORIZED_USERS," == *",$author,"* ]]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
+          # Process each mention
+          echo "$MENTIONS" | jq -c '.[]' | while read -r mention; do
+            REPO=$(echo "$mention" | jq -r '.repository')
+            SUBJECT_TYPE=$(echo "$mention" | jq -r '.subject_type')
+            SUBJECT_URL=$(echo "$mention" | jq -r '.subject_url')
+            NOTIFICATION_ID=$(echo "$mention" | jq -r '.id')
+            TITLE=$(echo "$mention" | jq -r '.subject_title')
+            REASON=$(echo "$mention" | jq -r '.reason')
+            
+            echo ""
+            echo "📌 Processing: [$REPO] $SUBJECT_TYPE - $TITLE (reason: $REASON)"
+            
+            # Skip own-repo notifications — already handled by the agent job's event triggers
+            if [ "$REPO" = "${{ github.repository }}" ]; then
+              echo "  ⏭️ Skipping own-repo notification (handled by agent job)"
+              curl -s -X PATCH \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
+              continue
+            fi
+            
+            # Get the actual issue/PR content
+            CONTENT=$(curl -s -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$SUBJECT_URL")
+            
+            BODY=$(echo "$CONTENT" | jq -r '.body // ""')
+            NUMBER=$(echo "$CONTENT" | jq -r '.number')
+            MENTION_AUTHOR=""
+            MENTION_SOURCE=""
+            
+            # Check 1: Issue/PR body
+            if echo "$BODY" | grep -qi "@agent-of-mkmeral"; then
+              MENTION_AUTHOR=$(echo "$CONTENT" | jq -r '.user.login // ""')
+              MENTION_SOURCE="body"
+              echo "  🔍 Found mention in body by @$MENTION_AUTHOR"
+            fi
+            
+            # Check 2: Issue/PR comments
+            if [ -z "$MENTION_AUTHOR" ]; then
+              COMMENTS_URL=$(echo "$CONTENT" | jq -r '.comments_url // ""')
+              if [ -n "$COMMENTS_URL" ] && [ "$COMMENTS_URL" != "null" ]; then
+                LATEST_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "${COMMENTS_URL}?per_page=20&sort=created&direction=desc")
+                
+                MENTION_COMMENT=$(echo "$LATEST_COMMENTS" | jq -r '
+                  [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last // empty
+                ')
+                
+                if [ -n "$MENTION_COMMENT" ]; then
+                  MENTION_AUTHOR=$(echo "$LATEST_COMMENTS" | jq -r '
+                    [.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last | .user.login // ""
+                  ')
+                  MENTION_SOURCE="comment"
+                  echo "  🔍 Found mention in comment by @$MENTION_AUTHOR"
+                fi
+              fi
+            fi
+            
+            # Check 3: PR review bodies
+            if [ -z "$MENTION_AUTHOR" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+              REVIEWS_URL="${SUBJECT_URL}/reviews"
+              REVIEWS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "${REVIEWS_URL}?per_page=20")
+              
+              MENTION_REVIEW=$(echo "$REVIEWS" | jq -r '
+                [.[] | select(.body != null and .body != "" and 
+                  (.body | test("@agent-of-mkmeral"; "i")))] | last // empty
+              ')
+              
+              if [ -n "$MENTION_REVIEW" ]; then
+                MENTION_AUTHOR=$(echo "$REVIEWS" | jq -r '
+                  [.[] | select(.body != null and .body != "" and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
+                ')
+                REVIEW_STATE=$(echo "$REVIEWS" | jq -r '
+                  [.[] | select(.body != null and .body != "" and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .state // ""
+                ')
+                MENTION_SOURCE="review ($REVIEW_STATE)"
+                echo "  🔍 Found mention in PR review by @$MENTION_AUTHOR"
+              fi
+            fi
+            
+            # Check 4: PR review line comments
+            if [ -z "$MENTION_AUTHOR" ] && [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+              REVIEW_COMMENTS_URL="${SUBJECT_URL}/comments"
+              REVIEW_COMMENTS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "${REVIEW_COMMENTS_URL}?per_page=20&sort=created&direction=desc")
+              
+              MENTION_LINE_COMMENT=$(echo "$REVIEW_COMMENTS" | jq -r '
+                [.[] | select(.body != null and 
+                  (.body | test("@agent-of-mkmeral"; "i")))] | last // empty
+              ')
+              
+              if [ -n "$MENTION_LINE_COMMENT" ]; then
+                MENTION_AUTHOR=$(echo "$REVIEW_COMMENTS" | jq -r '
+                  [.[] | select(.body != null and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .user.login // ""
+                ')
+                LINE_COMMENT_PATH=$(echo "$REVIEW_COMMENTS" | jq -r '
+                  [.[] | select(.body != null and 
+                    (.body | test("@agent-of-mkmeral"; "i")))] | last | .path // ""
+                ')
+                MENTION_SOURCE="line comment on $LINE_COMMENT_PATH"
+                echo "  🔍 Found mention in PR line comment by @$MENTION_AUTHOR"
+              fi
+            fi
+            
+            # Decision: dispatch or skip
+            if [ -z "$MENTION_AUTHOR" ]; then
+              if [ "$REASON" = "mention" ] || [ "$REASON" = "team_mention" ]; then
+                echo "  ⚠️ GitHub says reason='$REASON' but couldn't identify mentioning user — skipping for security"
+              else
+                echo "  ℹ️ No @agent-of-mkmeral mention found anywhere in $REPO#$NUMBER"
+              fi
+            elif is_authorized "$MENTION_AUTHOR"; then
+              echo "  ✅ @$MENTION_AUTHOR is AUTHORIZED — dispatching agent"
+              
+              # Extract actual comment/review content for the dispatch prompt
+              MENTION_BODY=""
+              
+              if [ "$MENTION_SOURCE" = "comment" ]; then
+                MENTION_BODY=$(echo "$LATEST_COMMENTS" | jq -r \
+                  '[.[] | select(.body | test("@agent-of-mkmeral"; "i"))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              elif [ "$MENTION_SOURCE" = "body" ]; then
+                MENTION_BODY="$BODY"
+              elif echo "$MENTION_SOURCE" | grep -q "^review"; then
+                MENTION_BODY=$(echo "$REVIEWS" | jq -r \
+                  '[.[] | select(.body != null and .body != "" and (.body | test("@agent-of-mkmeral"; "i")))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              elif echo "$MENTION_SOURCE" | grep -q "^line comment"; then
+                MENTION_BODY=$(echo "$REVIEW_COMMENTS" | jq -r \
+                  '[.[] | select(.body != null and (.body | test("@agent-of-mkmeral"; "i")))] | last | .body // ""' \
+                  2>/dev/null || echo "")
+              fi
+              
+              # Truncate to avoid workflow_dispatch input limits (65535 chars)
+              if [ ${#MENTION_BODY} -gt 2000 ]; then
+                MENTION_BODY="${MENTION_BODY:0:2000}... (truncated)"
+              fi
+              
+              echo "  📝 Comment body extracted (${#MENTION_BODY} chars)"
+              
+              # Build URL
+              if [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+                DISPATCH_URL="https://github.com/$REPO/pull/$NUMBER"
+              else
+                DISPATCH_URL="https://github.com/$REPO/issues/$NUMBER"
+              fi
+              
+              # Build rich prompt with actual content + timestamp
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              PROMPT_FILE=$(mktemp)
+              if [ -n "$MENTION_BODY" ]; then
+                printf '%s\n' "NEW mention at $TIMESTAMP by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER." \
+                  "URL: $DISPATCH_URL" "" \
+                  "What @$MENTION_AUTHOR said:" "$MENTION_BODY" "" \
+                  "This is a NEW trigger with new content above. Do NOT dismiss as duplicate." \
+                  "Check the PR/issue for all recent comments and reviews, then respond appropriately." \
+                  > "$PROMPT_FILE"
+              else
+                printf '%s\n' "NEW mention at $TIMESTAMP by @$MENTION_AUTHOR in $MENTION_SOURCE of $REPO#$NUMBER." \
+                  "URL: $DISPATCH_URL" "" \
+                  "This is a NEW trigger. Do NOT dismiss as duplicate." \
+                  "Check the PR/issue for the latest comments and reviews, then respond appropriately." \
+                  > "$PROMPT_FILE"
+              fi
+              
+              # Session ID for conversation persistence
+              REPO_SLUG=$(echo "$REPO" | tr '/' '-')
+              if [ "$SUBJECT_TYPE" = "PullRequest" ]; then
+                SESSION_ID="gh-${REPO_SLUG}-pr-${NUMBER}"
+              else
+                SESSION_ID="gh-${REPO_SLUG}-issue-${NUMBER}"
+              fi
+              echo "  📎 Session ID: $SESSION_ID"
+              
+              # Dispatch agent.yml via workflow_dispatch
+              PAYLOAD=$(jq -n \
+                --arg ref "main" \
+                --arg prompt "$(cat "$PROMPT_FILE")" \
+                --arg session_id "$SESSION_ID" \
+                '{ref: $ref, inputs: {prompt: $prompt, session_id: $session_id}}')
+              rm -f "$PROMPT_FILE"
+              
+              curl -s -X POST \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/agent.yml/dispatches" \
+                -d "$PAYLOAD"
+              
+              echo "  ✅ Workflow dispatched for @$MENTION_AUTHOR"
+            else
+              echo "  🚫 @$MENTION_AUTHOR is NOT authorized — skipping"
+            fi
+            
+            # Always mark notification as read
+            curl -s -X PATCH \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/notifications/threads/$NOTIFICATION_ID"
+            
+          done
+          
+          echo ""
+          echo "✅ Mentions check complete"

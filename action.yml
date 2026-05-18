@@ -66,6 +66,16 @@ inputs:
     required: false
     default: 'us-west-2'
 
+  enable_otel:
+    description: 'Enable AgentCore observability via aws-opentelemetry-distro (sends traces to GenAI observability console)'
+    required: false
+    default: ''
+
+  otel_service_name:
+    description: 'Agent service name / agent-id for AgentCore observability (used in log group name, resource attributes, etc.)'
+    required: false
+    default: 'strands-coder'
+
 
 runs:
   using: 'composite'
@@ -81,6 +91,7 @@ runs:
       run: |
         git config --global user.name "${{ inputs.git_user_name }}"
         git config --global user.email "${{ inputs.git_user_email }}"
+        git config --global core.pager cat
 
     - name: Configure AWS (Bedrock only)
       if: inputs.aws_role_arn != ''
@@ -113,6 +124,10 @@ runs:
           echo "📦 Installing custom dependencies: ${{ inputs.dependencies }}"
           uv pip install ${{ inputs.dependencies }}
         fi
+        if [ "${{ inputs.enable_otel }}" = "true" ]; then
+          echo "📊 Installing aws-opentelemetry-distro for AgentCore observability"
+          uv pip install "aws-opentelemetry-distro>=0.10.1"
+        fi
 
     - name: Download Custom Agent Runner
       if: inputs.agent_runner != ''
@@ -136,12 +151,45 @@ runs:
         MCP_SERVERS: ${{ inputs.mcp_servers || env.MCP_SERVERS }}
         STRANDS_PROMPT: ${{ inputs.prompt }}
         PYTHONPATH: ${{ github.action_path }}
+        GIT_PAGER: cat
+        PAGER: cat
+        MANPAGER: cat
         VIRTUAL_ENV: ${{ github.action_path }}/.venv
+        # AgentCore Observability for non-runtime agents
+        # Ref: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html#observability-configure-3p
+        AGENT_OBSERVABILITY_ENABLED: ${{ inputs.enable_otel == 'true' && 'true' || '' }}
+        # Use latest GenAI conventions to prevent LLO handler from stripping content events from spans
+        # The LLO handler strips events named gen_ai.choice, gen_ai.user.message, etc. (legacy conventions)
+        # but preserves gen_ai.client.inference.operation.details (latest conventions)
+        OTEL_SEMCONV_STABILITY_OPT_IN: ${{ inputs.enable_otel == 'true' && 'gen_ai_latest_experimental' || '' }}
+        OTEL_PYTHON_DISTRO: ${{ inputs.enable_otel == 'true' && 'aws_distro' || '' }}
+        OTEL_PYTHON_CONFIGURATOR: ${{ inputs.enable_otel == 'true' && 'aws_configurator' || '' }}
+        OTEL_EXPORTER_OTLP_PROTOCOL: ${{ inputs.enable_otel == 'true' && 'http/protobuf' || '' }}
+        OTEL_TRACES_EXPORTER: ${{ inputs.enable_otel == 'true' && 'otlp' || '' }}
+        OTEL_RESOURCE_ATTRIBUTES: ${{ inputs.enable_otel == 'true' && format('service.name={0},aws.log.group.names=/aws/bedrock-agentcore/runtimes/{0}', inputs.otel_service_name || env.OTEL_SERVICE_NAME || 'strands-coder') || '' }}
+        OTEL_EXPORTER_OTLP_LOGS_HEADERS: ${{ inputs.enable_otel == 'true' && format('x-aws-log-group=/aws/bedrock-agentcore/runtimes/{0},x-aws-log-stream=runtime-logs,x-aws-metric-namespace=bedrock-agentcore', inputs.otel_service_name || env.OTEL_SERVICE_NAME || 'strands-coder') || '' }}
+        # Keep support for user-defined OTEL endpoint (e.g., Langfuse, custom collector)
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ env.OTEL_EXPORTER_OTLP_ENDPOINT || '' }}
+        OTEL_SERVICE_NAME: ${{ inputs.otel_service_name || env.OTEL_SERVICE_NAME || 'strands-coder' }}
       run: |
         echo "🔧 Model config: STRANDS_PROVIDER=${STRANDS_PROVIDER:-<default>} STRANDS_MODEL_ID=${STRANDS_MODEL_ID:-<default>} STRANDS_MAX_TOKENS=${STRANDS_MAX_TOKENS:-<default>}"
 
+        AGENT_SCRIPT="strands_coder/agent_runner.py"
         if [ -f "${{ github.action_path }}/custom_agent_runner.py" ]; then
-          "${{ github.action_path }}/.venv/bin/python" "${{ github.action_path }}/custom_agent_runner.py"
+          AGENT_SCRIPT="custom_agent_runner.py"
+        fi
+
+        if [ "${{ inputs.enable_otel }}" = "true" ]; then
+          echo "📊 AgentCore observability enabled (aws-opentelemetry-distro)"
+          echo "   Service name: ${OTEL_SERVICE_NAME}"
+          echo "   Traces → GenAI Observability (region: ${{ inputs.aws_region }})"
+          echo "   Log group → /aws/bedrock-agentcore/runtimes/${OTEL_SERVICE_NAME}"
+          "${{ github.action_path }}/.venv/bin/opentelemetry-instrument" \
+            "${{ github.action_path }}/.venv/bin/python" \
+            "${{ github.action_path }}/${AGENT_SCRIPT}"
+        elif [ -n "$OTEL_EXPORTER_OTLP_ENDPOINT" ]; then
+          echo "📊 OTEL endpoint: $OTEL_EXPORTER_OTLP_ENDPOINT"
+          "${{ github.action_path }}/.venv/bin/python" "${{ github.action_path }}/${AGENT_SCRIPT}"
         else
-          "${{ github.action_path }}/.venv/bin/python" "${{ github.action_path }}/strands_coder/agent_runner.py"
+          "${{ github.action_path }}/.venv/bin/python" "${{ github.action_path }}/${AGENT_SCRIPT}"
         fi
